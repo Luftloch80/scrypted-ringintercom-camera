@@ -282,6 +282,7 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
     async getVideoStream(options?: RequestMediaStreamOptions): Promise<MediaObject> {
         const vsos = await this.getVideoStreamOptions();
         const id = options?.id || vsos[0]?.id;
+        this.console.log('video stream requested', id, this.useReolink ? '(Reolink)' : '(Scrypted Kamera)');
 
         if (id !== INTERCOM_STREAM_ID)
             return this.getSourceVideoStream({ ...options, id });

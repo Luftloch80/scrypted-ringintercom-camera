@@ -3,7 +3,13 @@ import dgram from 'dgram';
 import net from 'net';
 import { RingApi, RingCamera, RingIntercom } from 'ring-client-api';
 import type { StreamingSession } from 'ring-client-api/streaming/streaming-session';
-import { RtpPacket } from 'werift';
+import { RtpHeader, RtpPacket } from 'werift';
+
+const OPUS_PAYLOAD_TYPE = 111;
+// 20ms at 48khz.
+const OPUS_FRAME_SAMPLES = 960;
+// a 20ms opus (celt) frame of silence.
+const OPUS_SILENCE = Buffer.from([0xF8, 0xFF, 0xFE]);
 
 /**
  * Ring Intercoms are not cameras in ring-client-api, so there is no startLiveCall() on them.
@@ -180,11 +186,15 @@ export class RingIntercomAudio {
             let cp: ChildProcess | undefined;
             let udp: dgram.Socket | undefined;
             let lease: Lease | undefined;
+            let silenceTimer: NodeJS.Timeout | undefined;
+            let unsubscribe: (() => void) | undefined;
             let closed = false;
             const cleanup = () => {
                 if (closed)
                     return;
                 closed = true;
+                clearInterval(silenceTimer);
+                unsubscribe?.();
                 killQuiet(cp);
                 closeQuiet(udp);
                 closeQuiet(client);
@@ -194,32 +204,9 @@ export class RingIntercomAudio {
             client.on('error', cleanup);
 
             try {
-                lease = await this.acquire();
-                if (closed) {
-                    lease.release();
-                    return;
-                }
-                const { session } = lease;
-                session.onCallEnded.subscribe(cleanup);
-
-                // ffmpeg needs the payload type of the incoming audio in its sdp,
-                // so wait for the first packet before starting it.
-                const first = await new Promise<RtpPacket>((resolve, reject) => {
-                    const timeout = setTimeout(() => {
-                        sub.unsubscribe();
-                        reject(new Error('timed out waiting for Ring Intercom audio'));
-                    }, 20000);
-                    const sub = session.onAudioRtp.subscribe(rtp => {
-                        clearTimeout(timeout);
-                        sub.unsubscribe();
-                        resolve(rtp);
-                    });
-                });
-                if (closed)
-                    return;
-
-                const payloadType = first.header.payloadType;
-                const usingOpus = payloadType !== 0 && await session.isUsingOpus.catch(() => true);
+                // ffmpeg is started right away so the picture is available immediately, even if
+                // the Ring session takes a few seconds or fails. Until Ring audio arrives (and
+                // whenever it pauses), opus silence is fed in, otherwise ffmpeg would not output anything.
                 const rtpPort = await reserveRtpPort();
                 const sdp = [
                     'v=0',
@@ -227,8 +214,8 @@ export class RingIntercomAudio {
                     's=Ring Intercom',
                     'c=IN IP4 127.0.0.1',
                     't=0 0',
-                    `m=audio ${rtpPort} RTP/AVP ${payloadType}`,
-                    usingOpus ? `a=rtpmap:${payloadType} opus/48000/2` : `a=rtpmap:${payloadType} PCMU/8000`,
+                    `m=audio ${rtpPort} RTP/AVP ${OPUS_PAYLOAD_TYPE}`,
+                    `a=rtpmap:${OPUS_PAYLOAD_TYPE} opus/48000/2`,
                     '',
                 ].join('\r\n');
 
@@ -250,23 +237,99 @@ export class RingIntercomAudio {
                     'pipe:1',
                 ];
 
+                if (closed)
+                    return;
+                this.console.log('starting intercom stream');
                 cp = spawn(await this.getFFmpegPath(), args, {
                     stdio: ['pipe', 'pipe', 'pipe'],
                 });
                 cp.stderr!.on('data', data => this.console.log('[intercom-stream]', data.toString().trim()));
-                cp.on('exit', cleanup);
+                cp.on('exit', code => {
+                    this.console.log('intercom stream ffmpeg exited', code);
+                    cleanup();
+                });
                 cp.stdout!.pipe(client);
                 cp.stdin!.end(sdp);
 
                 udp = dgram.createSocket('udp4');
                 const sendUdp = udp;
-                const forward = (rtp: RtpPacket) => {
-                    if (!closed)
-                        sendUdp.send(rtp.serialize(), rtpPort, '127.0.0.1');
+                const ssrc = Math.floor(Math.random() * 0xFFFFFFFF);
+                const startTime = Date.now();
+                let sequenceNumber = 0;
+                let timestamp = 0;
+                let lastRingTimestamp: number | undefined;
+                let lastRingPacket = 0;
+
+                const send = (payload: Buffer) => {
+                    if (closed)
+                        return;
+                    const rtp = new RtpPacket(new RtpHeader({
+                        payloadType: OPUS_PAYLOAD_TYPE,
+                        sequenceNumber,
+                        timestamp,
+                        ssrc,
+                    }), payload);
+                    sequenceNumber = (sequenceNumber + 1) & 0xFFFF;
+                    sendUdp.send(rtp.serialize(), rtpPort, '127.0.0.1');
                 };
-                forward(first);
-                const sub = session.onAudioRtp.subscribe(forward);
-                client.once('close', () => sub.unsubscribe());
+
+                // fill gaps with silence, paced by the wall clock.
+                silenceTimer = setInterval(() => {
+                    if (Date.now() - lastRingPacket < 200)
+                        return;
+                    const expected = (Date.now() - startTime) * 48;
+                    while (timestamp + OPUS_FRAME_SAMPLES <= expected) {
+                        send(OPUS_SILENCE);
+                        timestamp += OPUS_FRAME_SAMPLES;
+                        lastRingTimestamp = undefined;
+                    }
+                }, 20);
+
+                try {
+                    lease = await this.acquire();
+                }
+                catch (e) {
+                    this.console.error('Ring Intercom live session failed, streaming video without intercom audio', e);
+                    return;
+                }
+                if (closed) {
+                    lease.release();
+                    lease = undefined;
+                    return;
+                }
+                const { session } = lease;
+
+                let warnedPcmu = false;
+                const sub = session.onAudioRtp.subscribe(rtp => {
+                    if (rtp.header.payloadType === 0) {
+                        if (!warnedPcmu) {
+                            warnedPcmu = true;
+                            this.console.warn('Ring negotiated PCMU audio, which the intercom stream does not support.');
+                        }
+                        return;
+                    }
+                    if (!lastRingPacket)
+                        this.console.log('receiving Ring Intercom audio');
+                    // continue the local timeline using the timing of the ring packets.
+                    let delta = OPUS_FRAME_SAMPLES;
+                    if (lastRingTimestamp !== undefined) {
+                        const d = (rtp.header.timestamp - lastRingTimestamp) >>> 0;
+                        if (d > 0 && d < 48000)
+                            delta = d;
+                    }
+                    lastRingTimestamp = rtp.header.timestamp;
+                    lastRingPacket = Date.now();
+                    timestamp += delta;
+                    send(rtp.payload);
+                });
+                const ended = session.onCallEnded.subscribe(() => {
+                    this.console.log('Ring session ended, continuing intercom stream without audio');
+                    lastRingPacket = 0;
+                });
+                unsubscribe = () => {
+                    sub.unsubscribe();
+                    ended.unsubscribe();
+                };
             }
             catch (e) {
                 this.console.error('intercom stream failed', e);
