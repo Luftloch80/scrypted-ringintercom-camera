@@ -1,7 +1,7 @@
 {
    "name": "@luftloch80/scrypted-ringintercom-camera",
    "version": "0.1.0",
-   "description": "Ring Intercom (Klingel, 2-Wege-Audio, Türöffner) kombiniert mit dem Bild einer Reolink-Kamera als ein Türklingel-Gerät in Scrypted.",
+   "description": "Ring Intercom (Klingel, 2-Wege-Audio, T\u00fcr\u00f6ffner) kombiniert mit dem Bild einer Reolink-Kamera als ein T\u00fcrklingel-Ger\u00e4t in Scrypted.",
    "author": "Luftloch80",
    "license": "MIT",
    "repository": {
@@ -31,13 +31,13 @@
       "doorbell"
    ],
    "scrypted": {
+      "rollup": true,
       "name": "Ring Intercom + Reolink Camera",
       "type": "DeviceProvider",
       "interfaces": [
          "DeviceProvider",
          "Settings"
       ],
-      "babel": true,
       "pluginDependencies": [
          "@scrypted/prebuffer-mixin",
          "@scrypted/snapshot",
@@ -51,7 +51,10 @@
    "devDependencies": {
       "@scrypted/sdk": "^0.5.59",
       "@types/node": "^22.19.1",
-      "terser-webpack-plugin": "^5.6.1",
-      "typescript": "^5.9.3"
+      "typescript": "^5.9.3",
+      "unicorn-magic": "file:./shims/unicorn-magic"
+   },
+   "overrides": {
+      "unicorn-magic": "$unicorn-magic"
    }
 }

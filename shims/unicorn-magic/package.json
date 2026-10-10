@@ -1,0 +1,10 @@
+{
+	"name": "unicorn-magic",
+	"version": "0.3.0",
+	"description": "unicorn-magic 0.3.0 (MIT, sindresorhus) with the node implementation as the default export, so the Scrypted rollup build (which does not resolve the \"node\" export condition) can bundle it.",
+	"license": "MIT",
+	"type": "module",
+	"main": "./index.js",
+	"exports": "./index.js",
+	"sideEffects": false
+}
