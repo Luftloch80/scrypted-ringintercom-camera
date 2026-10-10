@@ -1,0 +1,62 @@
+# Ring Intercom + Reolink Camera (Scrypted Plugin)
+
+Dieses Plugin verbindet einen **Ring Intercom** mit dem Bild einer **Reolink-Kamera** zu **einem** Türklingel-Gerät in Scrypted:
+
+| Funktion | Quelle |
+| --- | --- |
+| Livebild, Snapshots, Aufzeichnung | Reolink-Kamera (direkt per IP **oder** eine schon in Scrypted vorhandene Kamera) |
+| Klingel-Erkennung (`BinarySensor`, Doorbell) | Ring Intercom (Push-Benachrichtigung von Ring) |
+| 2-Wege-Audio (sprechen **und** hören) | Ring Intercom (Ring WebRTC Live-Sitzung) |
+| Türöffner (`Lock`) | Ring Intercom (`unlock_door`) |
+| Akkustand | Ring Intercom |
+
+Der Code basiert auf dem offiziellen [Scrypted Ring Plugin](https://github.com/koush/scrypted/tree/main/plugins/ring) (Login, 2FA, Refresh-Token) und dem [Scrypted Reolink Plugin](https://github.com/koush/scrypted/tree/main/plugins/reolink) (RTSP-Streams, Snapshot-API). Für Ring wird [`ring-client-api`](https://github.com/dgreif/ring) verwendet.
+Das offizielle Ring-Plugin erkennt Intercoms gar nicht. Dieses Plugin nutzt die Intercom-Unterstützung von `ring-client-api` (Klingel, Türöffner) und baut die Live-Audio-Sitzung über dieselbe WebRTC-Signalisierung auf, die Ring auch für Kameras verwendet.
+
+## Installation
+
+```bash
+npm install
+npm run build                 # erzeugt out/plugin.zip
+npx scrypted login <scrypted-ip>
+npm run scrypted-deploy <scrypted-ip>
+```
+
+## Einrichtung
+
+1. **Plugin-Einstellungen**: Ring E-Mail und Passwort eintragen. Wenn Ring einen Code schickt, diesen im Feld **Zwei-Faktor-Code** eintragen.
+2. Pro Ring Intercom legt das Plugin zwei Geräte an:
+   - **`<Name>`**: Türklingel mit Kamera, Klingel und 2-Wege-Audio
+   - **`<Name> Türöffner`**: Schloss zum Öffnen der Tür
+3. In der Türklingel unter **Bildquelle** wählen:
+   - **Reolink**: IP-Adresse, Benutzer, Passwort und Kanal (bei Einzelkameras `0`) eintragen. Für 4K/H.265-Modelle als RTSP-Pfad `h265Preview` wählen. RTSP muss in der Reolink-App bzw. im Web-UI aktiviert sein (*Netzwerk → Erweitert → Server-Einstellungen*).
+   - **Scrypted Kamera**: eine schon eingebundene Kamera auswählen (z. B. aus dem offiziellen Reolink-Plugin).
+
+## Streams und Audio
+
+Die Türklingel bietet diese Streams an:
+
+| Stream | Video | Audio | Prebuffer |
+| --- | --- | --- | --- |
+| `Reolink Main` / `Reolink Sub` (oder die Streams der gewählten Scrypted-Kamera) | Kamera | Mikrofon der Kamera | ja |
+| `Kamera + Ring Intercom Audio` | Kamera | **Türsprechstelle über Ring** | nein (nur bei Bedarf) |
+
+Der Intercom-Stream baut nur während der Wiedergabe eine Ring-Live-Sitzung auf und beendet sie wenige Sekunden nach dem Schließen wieder. So wird der Akku des Intercoms geschont. Damit dieser Stream nicht dauerhaft gepuffert wird, meldet das Gerät einen Akku (`Battery`). Nur die Kamera-Streams sind mit `allowBatteryPrebuffer` freigegeben.
+
+**Was hört man im Livebild?**
+
+- Standard: das Mikrofon der Kamera. Gegensprechen geht trotzdem immer über den Ring Intercom.
+- Wenn man im Livebild die Türsprechstelle hören möchte: in den Einstellungen der Türklingel **Intercom-Audio als Standard-Stream** einschalten. Alternativ in den *Rebroadcast*-Einstellungen den Stream `Kamera + Ring Intercom Audio` als *Local/Remote Stream* auswählen. Aufzeichnungen (NVR/HKSV) sollten weiter einen Kamera-Stream nutzen.
+
+**Gegensprechen** (HomeKit, Scrypted-App, WebRTC): Das Audio wird nach Opus (oder PCMU, je nachdem, was Ring aushandelt) umgewandelt und an den Lautsprecher der Türsprechstelle gesendet.
+
+## Klingel und Türöffner
+
+- Klingelt jemand an der Türsprechstelle, schickt Ring eine Push-Benachrichtigung. Das Gerät setzt dann `binaryState` (Doorbell) für die eingestellte **Klingel-Dauer** (Standard 10 s).
+- Der **Türöffner** löst den Summer über Ring aus. Er zeigt kurz „entriegelt“ und springt dann wieder auf „verriegelt“.
+
+## Hinweise und Einschränkungen
+
+- Das 2-Wege-Audio mit dem Intercom nutzt eine Ring-Schnittstelle, die Ring nicht offiziell dokumentiert. Wenn Ring etwas ändert, braucht es meist ein Update von `ring-client-api`.
+- Video und Intercom-Audio kommen aus zwei Geräten und laufen über die Ring-Cloud. Das Audio kann deshalb etwas hinter dem Bild liegen.
+- In den Einstellungen des Intercoms in der Ring-App muss Live-Ansicht/Live-Gespräch erlaubt sein.
