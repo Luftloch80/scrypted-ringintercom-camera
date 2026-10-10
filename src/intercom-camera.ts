@@ -1,19 +1,27 @@
-import sdk, { Battery, BinarySensor, Camera, FFmpegInput, Intercom, MediaObject, RequestMediaStreamOptions, RequestPictureOptions, ResponseMediaStreamOptions, ResponsePictureOptions, ScryptedDeviceBase, ScryptedInterface, ScryptedMimeTypes, Setting, Settings, SettingValue, VideoCamera } from '@scrypted/sdk';
+import sdk, { Battery, BinarySensor, Camera, EventListenerRegister, FFmpegInput, Intercom, MediaObject, MotionSensor, RequestMediaStreamOptions, RequestPictureOptions, ResponseMediaStreamOptions, ResponsePictureOptions, ScryptedDevice, ScryptedDeviceBase, ScryptedInterface, ScryptedMimeTypes, Setting, Settings, SettingValue, VideoCamera } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import type { RingIntercom } from 'ring-client-api';
 import type RingIntercomCameraPlugin from './main';
-import { ReolinkClient, ReolinkRtspPath } from './reolink';
+import { ReolinkClient, ReolinkEncoderStream, ReolinkRtspPath } from './reolink';
 import { RingIntercomAudio } from './ring-audio';
 
 const { mediaManager, systemManager } = sdk;
 
 export const INTERCOM_STREAM_ID = 'ring-intercom';
 const DING_RESET_MS = 10000;
+const MOTION_POLL_MS = 2000;
 
-export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamera, Camera, Intercom, BinarySensor, Battery, Settings {
+export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamera, Camera, Intercom, BinarySensor, MotionSensor, Battery, Settings {
     audio: RingIntercomAudio;
     private dingTimeout?: NodeJS.Timeout;
     private reolink?: ReolinkClient;
+    private encoderConfig?: Promise<{ main?: ReolinkEncoderStream, sub?: ReolinkEncoderStream } | undefined>;
+    private cameraMotion = false;
+    private dingMotion = false;
+    private dingMotionTimeout?: NodeJS.Timeout;
+    private motionPoll?: NodeJS.Timeout;
+    private motionListener?: EventListenerRegister;
+    private motionPollFailed = false;
 
     storageSettings = new StorageSettings(this, {
         videoSource: {
@@ -78,16 +86,18 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             title: 'Kamera',
             description: 'Vorhandene Scrypted-Kamera, deren Bild verwendet werden soll.',
             type: 'device',
-            deviceFilter: ({ id, interfaces }) => id !== this.id && interfaces.includes(ScryptedInterface.VideoCamera),
+            // the filter is evaluated in the ui, so it has to be an expression string.
+            onGet: async () => ({
+                deviceFilter: `id !== '${this.id}' && interfaces.includes('${ScryptedInterface.VideoCamera}')`,
+            }),
             onPut: () => this.resetVideoSource(),
         },
-        intercomStreamFirst: {
+        intercomStreamInfo: {
             group: 'Intercom',
-            title: 'Intercom-Audio als Standard-Stream',
-            description: 'Wenn aktiv, ist der Stream "Kamera + Ring Intercom Audio" der Standard-Stream. Dann hört man im Livebild die Türsprechstelle (startet jedes Mal eine Ring-Sitzung). Sonst wird das Audio der Kamera verwendet und der Intercom-Stream muss explizit ausgewählt werden.',
-            type: 'boolean',
-            defaultValue: false,
-            onPut: () => this.onDeviceEvent(ScryptedInterface.VideoCamera, undefined),
+            title: 'Intercom-Audio im Livebild',
+            type: 'html',
+            readonly: true,
+            defaultValue: '<p>Um im Livebild die Türsprechstelle zu hören: unter <b>Extensions → Rebroadcast</b> bei <i>Local Stream</i> und <i>Remote Stream</i> den Stream <b>Kamera + Ring Intercom Audio</b> wählen. <i>Remote Recording Stream</i> (HomeKit Secure Video) und <i>Local Recording Stream</i> müssen ein Kamera-Stream bleiben.</p>',
         },
         intercomStreamBase: {
             group: 'Intercom',
@@ -96,6 +106,21 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             choices: ['Main', 'Sub'],
             defaultValue: 'Main',
             onPut: () => this.onDeviceEvent(ScryptedInterface.VideoCamera, undefined),
+        },
+        motionSource: {
+            group: 'Bewegung (HomeKit Secure Video)',
+            title: 'Bewegungserkennung',
+            description: 'Bewegungen der Kamera an das Gerät weitergeben. Wird für HomeKit Secure Video benötigt.',
+            choices: ['Kamera', 'Aus'],
+            defaultValue: 'Kamera',
+            onPut: () => this.startMotion(),
+        },
+        dingTriggersMotion: {
+            group: 'Bewegung (HomeKit Secure Video)',
+            title: 'Klingeln löst Bewegung aus',
+            description: 'Beim Klingeln wird auch eine Bewegung gemeldet, damit HomeKit Secure Video eine Aufnahme startet.',
+            type: 'boolean',
+            defaultValue: true,
         },
         dingResetSeconds: {
             group: 'Intercom',
@@ -121,6 +146,75 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             clearTimeout(this.dingTimeout);
             const seconds = parseFloat(this.storageSettings.values.dingResetSeconds) || DING_RESET_MS / 1000;
             this.dingTimeout = setTimeout(() => this.binaryState = false, seconds * 1000);
+
+            if (this.storageSettings.values.dingTriggersMotion) {
+                this.dingMotion = true;
+                this.updateMotion();
+                clearTimeout(this.dingMotionTimeout);
+                this.dingMotionTimeout = setTimeout(() => {
+                    this.dingMotion = false;
+                    this.updateMotion();
+                }, Math.max(seconds, 10) * 1000);
+            }
+        });
+
+        this.motionDetected = false;
+        this.startMotion();
+    }
+
+    private updateMotion() {
+        const motion = this.cameraMotion || this.dingMotion;
+        if (this.motionDetected !== motion)
+            this.motionDetected = motion;
+    }
+
+    private stopMotion() {
+        clearInterval(this.motionPoll);
+        this.motionPoll = undefined;
+        this.motionListener?.removeListener();
+        this.motionListener = undefined;
+        this.cameraMotion = false;
+        this.updateMotion();
+    }
+
+    startMotion() {
+        this.stopMotion();
+        if (this.storageSettings.values.motionSource === 'Aus')
+            return;
+
+        if (this.useReolink) {
+            if (!this.storageSettings.values.reolinkHost)
+                return;
+            this.motionPoll = setInterval(async () => {
+                try {
+                    this.cameraMotion = await this.getReolink().getMotionState();
+                    if (this.motionPollFailed)
+                        this.console.log('Reolink motion state available again');
+                    this.motionPollFailed = false;
+                }
+                catch (e) {
+                    if (!this.motionPollFailed)
+                        this.console.warn('Reolink motion state unavailable', (e as Error).message);
+                    this.motionPollFailed = true;
+                    this.cameraMotion = false;
+                }
+                this.updateMotion();
+            }, MOTION_POLL_MS);
+            return;
+        }
+
+        const camera = this.storageSettings.values.scryptedCamera as ScryptedDevice & MotionSensor | undefined;
+        if (!camera?.id)
+            return;
+        if (!camera.interfaces?.includes(ScryptedInterface.MotionSensor)) {
+            this.console.warn('the selected Scrypted camera has no motion sensor');
+            return;
+        }
+        this.cameraMotion = !!camera.motionDetected;
+        this.updateMotion();
+        this.motionListener = systemManager.listenDevice(camera.id, ScryptedInterface.MotionSensor, (source, details, data) => {
+            this.cameraMotion = !!data;
+            this.updateMotion();
         });
     }
 
@@ -132,6 +226,8 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
 
     resetVideoSource() {
         this.reolink = undefined;
+        this.encoderConfig = undefined;
+        this.startMotion();
         this.onDeviceEvent(ScryptedInterface.VideoCamera, undefined);
     }
 
@@ -158,9 +254,9 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
     }
 
     getScryptedCamera() {
-        const id = this.storageSettings.values.scryptedCamera;
-        const device = id && systemManager.getDeviceById<VideoCamera & Camera>(id);
-        if (!device)
+        // StorageSettings resolves 'device' settings to the device itself.
+        const device = this.storageSettings.values.scryptedCamera as ScryptedDevice & VideoCamera & Camera & MotionSensor | undefined;
+        if (!device?.id)
             throw new Error('Bitte in den Einstellungen eine Scrypted-Kamera als Bildquelle auswählen.');
         return device;
     }
@@ -195,15 +291,33 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
     }
 
     // VideoCamera
+    private async getReolinkEncoderConfig() {
+        if (!this.encoderConfig) {
+            const reolink = this.getReolink();
+            this.encoderConfig = reolink.getEncoderConfiguration().catch(e => {
+                this.console.warn('unable to read Reolink stream resolutions', (e as Error).message);
+                // retry on the next request.
+                this.encoderConfig = undefined;
+                return undefined;
+            });
+        }
+        return this.encoderConfig;
+    }
+
     private async getSourceStreamOptions(): Promise<ResponseMediaStreamOptions[]> {
         if (this.useReolink) {
-            return this.getReolink().getStreams().map(stream => ({
+            const streams = this.getReolink().getStreams();
+            const enc = await this.getReolinkEncoderConfig();
+            return streams.map(stream => ({
                 id: stream.id,
                 name: stream.name,
                 container: 'rtsp',
                 tool: 'scrypted',
                 video: {
                     codec: this.storageSettings.values.reolinkRtspPath === 'h265Preview' && stream.id === 'main' ? 'h265' : 'h264',
+                    // the resolutions let Rebroadcast pick the right stream for each destination.
+                    width: enc?.[stream.id]?.width,
+                    height: enc?.[stream.id]?.height,
                 },
                 audio: {},
                 destinations: stream.id === 'main' ? ['local', 'local-recorder'] : ['remote', 'remote-recorder', 'low-resolution'],
@@ -234,6 +348,8 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             container: 'mpegts',
             tool: 'ffmpeg',
             video: {
+                // no resolution on purpose: Rebroadcast then never picks this stream automatically
+                // (e.g. for HomeKit Secure Video), it has to be selected explicitly.
                 codec: source.find(s => s.id === this.getIntercomBaseStreamId(source))?.video?.codec,
             },
             audio: {
@@ -243,12 +359,8 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             allowBatteryPrebuffer: false,
         };
 
-        if (!source.length)
-            return [intercomStream];
-
-        return this.storageSettings.values.intercomStreamFirst
-            ? [intercomStream, ...source]
-            : [...source, intercomStream];
+        // the intercom stream is always last, so it is never the default stream.
+        return [...source, intercomStream];
     }
 
     private getIntercomBaseStreamId(source: ResponseMediaStreamOptions[]) {
@@ -326,6 +438,8 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
 
     release() {
         clearTimeout(this.dingTimeout);
+        clearTimeout(this.dingMotionTimeout);
+        this.stopMotion();
         this.audio.stop();
     }
 }

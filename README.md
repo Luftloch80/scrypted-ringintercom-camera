@@ -6,6 +6,7 @@ Dieses Plugin verbindet einen **Ring Intercom** mit dem Bild einer **Reolink-Kam
 | --- | --- |
 | Livebild, Snapshots, Aufzeichnung | Reolink-Kamera (direkt per IP **oder** eine schon in Scrypted vorhandene Kamera) |
 | Klingel-Erkennung (`BinarySensor`, Doorbell) | Ring Intercom (Push-Benachrichtigung von Ring) |
+| Bewegung (`MotionSensor`, für HomeKit Secure Video) | Reolink-Kamera (optional zusätzlich beim Klingeln) |
 | 2-Wege-Audio (sprechen **und** hören) | Ring Intercom (Ring WebRTC Live-Sitzung) |
 | Türöffner (`Lock`) | Ring Intercom (`unlock_door`) |
 | Akkustand | Ring Intercom |
@@ -46,9 +47,27 @@ Der Intercom-Stream baut nur während der Wiedergabe eine Ring-Live-Sitzung auf 
 **Was hört man im Livebild?**
 
 - Standard: das Mikrofon der Kamera. Gegensprechen geht trotzdem immer über den Ring Intercom.
-- Wenn man im Livebild die Türsprechstelle hören möchte: in den Einstellungen der Türklingel **Intercom-Audio als Standard-Stream** einschalten. Alternativ in den *Rebroadcast*-Einstellungen den Stream `Kamera + Ring Intercom Audio` als *Local/Remote Stream* auswählen. Aufzeichnungen (NVR/HKSV) sollten weiter einen Kamera-Stream nutzen.
+- Wenn man im Livebild die Türsprechstelle hören möchte: in der Türklingel unter **Extensions → Rebroadcast** bei *Local Stream* und *Remote Stream* den Stream `Kamera + Ring Intercom Audio` auswählen. *Remote Recording Stream* (HKSV) und *Local Recording Stream* bleiben Kamera-Streams.
+- Der Intercom-Stream steht immer an letzter Stelle und hat keine Auflösungsangabe. So wählt Rebroadcast ihn nie automatisch aus, zum Beispiel nicht für Aufnahmen.
+- Der Intercom-Stream liefert das Bild sofort. Bis Audio von Ring kommt, und auch wenn Ring die Sitzung ablehnt, läuft Stille mit.
 
 **Gegensprechen** (HomeKit, Scrypted-App, WebRTC): Das Audio wird nach Opus (oder PCMU, je nachdem, was Ring aushandelt) umgewandelt und an den Lautsprecher der Türsprechstelle gesendet.
+
+## HomeKit Secure Video
+
+HKSV wird vom HomeKit-Plugin von Scrypted bereitgestellt, sobald ein Gerät einen Bewegungssensor meldet. Die Türklingel meldet Bewegung so:
+
+- **Bildquelle Reolink**: Der Bewegungsstatus der Kamera wird alle 2 s abgefragt (`GetMdState`).
+- **Bildquelle Scrypted Kamera**: Die Bewegung der gewählten Kamera wird übernommen.
+- **Klingeln löst Bewegung aus** (Standard: an): Beim Klingeln wird ebenfalls eine Bewegung gemeldet, damit HKSV aufnimmt.
+
+Einrichtung:
+
+1. Nach dem Update das **HomeKit-Plugin neu starten**. Falls die Aufnahme-Optionen in der Home-App nicht erscheinen, die Türklingel in der Home-App entfernen und neu koppeln.
+2. In der Home-App: Türklingel → Einstellungen → **Aufnahme-Optionen** → *Streamen & Aufnehmen*.
+3. In Scrypted unter **Extensions → Rebroadcast** muss der *Remote Recording Stream* ein Kamera-Stream sein, der vorgepuffert wird. Das ist die Standard-Einstellung.
+
+Die Option „HomeKit Secure Video 3“ im HomeKit-Plugin ist experimentell und wird für HKSV nicht benötigt.
 
 ## Klingel und Türöffner
 

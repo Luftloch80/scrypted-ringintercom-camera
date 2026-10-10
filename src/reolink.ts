@@ -21,6 +21,12 @@ export interface ReolinkStream {
     url: string;
 }
 
+export interface ReolinkEncoderStream {
+    width: number;
+    height: number;
+    vType?: string;
+}
+
 export class ReolinkClient {
     private token?: string;
     private tokenExpires = 0;
@@ -90,6 +96,46 @@ export class ReolinkClient {
         // renew one minute before the lease runs out.
         this.tokenExpires = Date.now() + Math.max(60, (token.leaseTime || 3600) - 60) * 1000;
         return this.token;
+    }
+
+    private async apiGet(cmd: string, timeout = 5000): Promise<any> {
+        const get = async () => {
+            const token = await this.login();
+            const url = new URL(`${this.httpBase}/api.cgi`);
+            url.searchParams.set('cmd', cmd);
+            url.searchParams.set('channel', (this.options.channel || 0).toString());
+            url.searchParams.set('token', token!);
+            const response = await fetch(url, {
+                signal: AbortSignal.timeout(timeout),
+            });
+            const json = await response.json();
+            const result = json?.[0];
+            if (result?.code !== 0)
+                throw new Error(`Reolink ${cmd} failed: ${JSON.stringify(result?.error || json)}`);
+            return result.value;
+        };
+
+        try {
+            return await get();
+        }
+        catch (e) {
+            // the token may have been invalidated, retry once with a new login.
+            this.token = undefined;
+            return get();
+        }
+    }
+
+    async getMotionState(): Promise<boolean> {
+        const value = await this.apiGet('GetMdState');
+        return !!value?.state;
+    }
+
+    async getEncoderConfiguration(): Promise<{ main?: ReolinkEncoderStream, sub?: ReolinkEncoderStream }> {
+        const value = await this.apiGet('GetEnc');
+        return {
+            main: value?.Enc?.mainStream,
+            sub: value?.Enc?.subStream,
+        };
     }
 
     async jpegSnapshot(timeout = 10000): Promise<Buffer> {

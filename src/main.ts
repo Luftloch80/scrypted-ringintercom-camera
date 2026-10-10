@@ -157,6 +157,8 @@ class RingIntercomCameraPlugin extends ScryptedDeviceBase implements DeviceProvi
                     ScryptedInterface.Camera,
                     ScryptedInterface.Intercom,
                     ScryptedInterface.BinarySensor,
+                    // motion is required for HomeKit Secure Video.
+                    ScryptedInterface.MotionSensor,
                     ScryptedInterface.Settings,
                 ];
                 if (intercom.batteryLevel != null)
