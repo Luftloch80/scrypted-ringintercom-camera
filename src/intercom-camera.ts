@@ -388,7 +388,42 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             };
             return mediaManager.createFFmpegMediaObject(ffmpegInput);
         }
-        return this.getScryptedCamera().getVideoStream(options);
+        return this.getScryptedSourceVideoStream(options);
+    }
+
+    /**
+     * The stream of another Scrypted camera usually is that camera's local rebroadcast (rtsp), but its
+     * mediaStreamOptions may still describe the camera's original stream (e.g. rtmp for Reolink).
+     * Rebroadcast picks its parser from that container, so correct it to match the actual url.
+     */
+    private async getScryptedSourceVideoStream(options?: RequestMediaStreamOptions): Promise<MediaObject> {
+        const mo = await this.getScryptedCamera().getVideoStream(options);
+        if (mo.mimeType !== ScryptedMimeTypes.FFmpegInput && mo.mimeType !== ScryptedMimeTypes.MediaStreamUrl)
+            return mo;
+
+        const ffmpegInput = await mediaManager.convertMediaObjectToJSON<FFmpegInput>(mo, ScryptedMimeTypes.FFmpegInput);
+        const url = ffmpegInput.url || '';
+        let container = ffmpegInput.mediaStreamOptions?.container || ffmpegInput.container;
+        if (url.startsWith('rtsp:'))
+            container = 'rtsp';
+        else if (url.startsWith('rtmp:'))
+            container = 'rtmp';
+        else if (url.startsWith('tcp:') || url.startsWith('http'))
+            container = ffmpegInput.container;
+
+        const mediaStreamOptions: ResponseMediaStreamOptions = {
+            ...ffmpegInput.mediaStreamOptions,
+            id: options?.id || ffmpegInput.mediaStreamOptions?.id,
+            container,
+        };
+        if (container !== ffmpegInput.mediaStreamOptions?.container)
+            this.console.log('source stream container', ffmpegInput.mediaStreamOptions?.container, '->', container, url.split('://')[0]);
+
+        return mediaManager.createFFmpegMediaObject({
+            ...ffmpegInput,
+            container,
+            mediaStreamOptions,
+        });
     }
 
     async getVideoStream(options?: RequestMediaStreamOptions): Promise<MediaObject> {
