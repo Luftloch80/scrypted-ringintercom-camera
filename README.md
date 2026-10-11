@@ -16,6 +16,21 @@ Das offizielle Ring-Plugin erkennt Intercoms gar nicht. Dieses Plugin nutzt die 
 
 ## Installation
 
+### Fertig gebaut (empfohlen, z. B. auf dem Raspberry Pi)
+
+Das Bauen braucht viel Arbeitsspeicher und kann einen Raspberry Pi einfrieren. Das fertige Plugin liegt deshalb unter `release/plugin.zip` im Repo, gebaut wird nichts:
+
+```bash
+git clone https://github.com/Luftloch80/scrypted-ringintercom-camera.git
+cd scrypted-ringintercom-camera
+npx scrypted login 192.168.0.50     # einmalig
+sh deploy-prebuilt.sh 192.168.0.50
+```
+
+Für ein Update reicht `git pull` und danach wieder `sh deploy-prebuilt.sh 192.168.0.50`. Nötig sind nur `curl` und `python3`, beide sind auf Raspberry Pi OS vorinstalliert.
+
+### Selbst bauen (auf einem PC)
+
 ```bash
 npm install
 npm run build                 # erzeugt out/plugin.zip
