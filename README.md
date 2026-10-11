@@ -4,7 +4,7 @@ Dieses Plugin verbindet einen **Ring Intercom** mit dem Bild einer **Reolink-Kam
 
 | Funktion | Quelle |
 | --- | --- |
-| Livebild, Snapshots, Aufzeichnung | Reolink-Kamera (direkt per IP **oder** eine schon in Scrypted vorhandene Kamera) |
+| Livebild, Snapshots, Aufzeichnung | Reolink-Kamera (direkt per IP) |
 | Klingel-Erkennung (`BinarySensor`, Doorbell) | Ring Intercom (Push-Benachrichtigung von Ring) |
 | Bewegung (`MotionSensor`, für HomeKit Secure Video) | Reolink-Kamera (optional zusätzlich beim Klingeln) |
 | 2-Wege-Audio (sprechen **und** hören) | Ring Intercom (Ring WebRTC Live-Sitzung) |
@@ -29,9 +29,7 @@ npm run scrypted-deploy <scrypted-ip>
 2. Pro Ring Intercom legt das Plugin zwei Geräte an:
    - **`<Name>`**: Türklingel mit Kamera, Klingel und 2-Wege-Audio
    - **`<Name> Türöffner`**: Schloss zum Öffnen der Tür
-3. In der Türklingel unter **Bildquelle** wählen:
-   - **Reolink**: IP-Adresse, Benutzer, Passwort und Kanal (bei Einzelkameras `0`) eintragen. Für 4K/H.265-Modelle als RTSP-Pfad `h265Preview` wählen. RTSP muss in der Reolink-App bzw. im Web-UI aktiviert sein (*Netzwerk → Erweitert → Server-Einstellungen*).
-   - **Scrypted Kamera**: eine schon eingebundene Kamera auswählen (z. B. aus dem offiziellen Reolink-Plugin).
+3. In der Türklingel unter **Reolink** IP-Adresse, Benutzer, Passwort und Kanal (bei Einzelkameras `0`) eintragen. Für 4K/H.265-Modelle als RTSP-Pfad `h265Preview` wählen. RTSP muss in der Reolink-App bzw. im Web-UI aktiviert sein (*Netzwerk → Erweitert → Server-Einstellungen*).
 
 ## Streams und Audio
 
@@ -39,7 +37,7 @@ Die Türklingel bietet diese Streams an:
 
 | Stream | Video | Audio | Prebuffer |
 | --- | --- | --- | --- |
-| `Reolink Main` / `Reolink Sub` (oder die Streams der gewählten Scrypted-Kamera) | Kamera | Mikrofon der Kamera | ja |
+| `Reolink Main` / `Reolink Sub` | Kamera | Mikrofon der Kamera | ja |
 | `Kamera + Ring Intercom Audio` | Kamera | **Türsprechstelle über Ring** | nein (nur bei Bedarf) |
 
 Der Intercom-Stream baut nur während der Wiedergabe eine Ring-Live-Sitzung auf und beendet sie wenige Sekunden nach dem Schließen wieder. So wird der Akku des Intercoms geschont. Damit dieser Stream nicht dauerhaft gepuffert wird, meldet das Gerät einen Akku (`Battery`). Nur die Kamera-Streams sind mit `allowBatteryPrebuffer` freigegeben.
@@ -57,8 +55,7 @@ Der Intercom-Stream baut nur während der Wiedergabe eine Ring-Live-Sitzung auf 
 
 HKSV wird vom HomeKit-Plugin von Scrypted bereitgestellt, sobald ein Gerät einen Bewegungssensor meldet. Die Türklingel meldet Bewegung so:
 
-- **Bildquelle Reolink**: Der Bewegungsstatus der Kamera wird alle 2 s abgefragt (`GetMdState`).
-- **Bildquelle Scrypted Kamera**: Die Bewegung der gewählten Kamera wird übernommen.
+- **Bewegungserkennung „Kamera“**: Der Bewegungsstatus der Reolink wird alle 2 s abgefragt (`GetMdState`).
 - **Klingeln löst Bewegung aus** (Standard: an): Beim Klingeln wird ebenfalls eine Bewegung gemeldet, damit HKSV aufnimmt.
 
 Einrichtung:
