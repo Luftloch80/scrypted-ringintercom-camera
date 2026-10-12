@@ -229,10 +229,12 @@ export class RingIntercomAudio {
                     '-map', '0:v:0',
                     '-map', '1:a:0',
                     '-c:v', 'copy',
-                    '-c:a', 'aac',
+                    // opus: Rebroadcast can not pass aac from mpegts on to its rtsp server.
+                    '-c:a', 'libopus',
+                    '-application', 'lowdelay',
                     '-ac', '1',
                     '-ar', '48000',
-                    '-b:a', '64k',
+                    '-b:a', '32k',
                     '-f', 'mpegts',
                     'pipe:1',
                 ];

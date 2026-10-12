@@ -1,4 +1,4 @@
-import { Lock, LockState, ScryptedDeviceBase } from '@scrypted/sdk';
+import { Battery, Lock, LockState, ScryptedDeviceBase } from '@scrypted/sdk';
 import type { RingIntercom } from 'ring-client-api';
 
 const RELOCK_MS = 5000;
@@ -7,13 +7,21 @@ const RELOCK_MS = 5000;
  * Door opener of the Ring Intercom. The intercom buzzes the door for a few seconds,
  * so the lock reports "unlocked" briefly and then returns to "locked".
  */
-export class RingIntercomLock extends ScryptedDeviceBase implements Lock {
+export class RingIntercomLock extends ScryptedDeviceBase implements Lock, Battery {
     private relockTimeout?: NodeJS.Timeout;
 
     constructor(nativeId: string, public intercom: RingIntercom) {
         super(nativeId);
         this.lockState = LockState.Locked;
         intercom.onUnlocked.subscribe(() => this.showUnlocked());
+        this.updateBattery();
+        intercom.onBatteryLevel.subscribe(() => this.updateBattery());
+    }
+
+    private updateBattery() {
+        const level = this.intercom.batteryLevel;
+        if (level != null)
+            this.batteryLevel = level;
     }
 
     private showUnlocked() {

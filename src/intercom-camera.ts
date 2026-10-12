@@ -1,6 +1,6 @@
 import { ChildProcess, spawn } from 'child_process';
 import net from 'net';
-import sdk, { Battery, BinarySensor, Camera, FFmpegInput, Intercom, MediaObject, MotionSensor, RequestMediaStreamOptions, RequestPictureOptions, ResponseMediaStreamOptions, ResponsePictureOptions, ScryptedDeviceBase, ScryptedInterface, ScryptedMimeTypes, Setting, Settings, SettingValue, VideoCamera } from '@scrypted/sdk';
+import sdk, { BinarySensor, Camera, FFmpegInput, Intercom, MediaObject, MotionSensor, RequestMediaStreamOptions, RequestPictureOptions, ResponseMediaStreamOptions, ResponsePictureOptions, ScryptedDeviceBase, ScryptedInterface, ScryptedMimeTypes, Setting, Settings, SettingValue, VideoCamera } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import type { RingIntercom } from 'ring-client-api';
 import type RingIntercomCameraPlugin from './main';
@@ -13,7 +13,7 @@ export const INTERCOM_STREAM_ID = 'ring-intercom';
 const DING_RESET_MS = 10000;
 const MOTION_POLL_MS = 2000;
 
-export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamera, Camera, Intercom, BinarySensor, MotionSensor, Battery, Settings {
+export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamera, Camera, Intercom, BinarySensor, MotionSensor, Settings {
     audio: RingIntercomAudio;
     private dingTimeout?: NodeJS.Timeout;
     private reolink?: ReolinkClient;
@@ -129,8 +129,6 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         this.audio = new RingIntercomAudio(() => plugin.api!, intercom, () => mediaManager.getFFmpegPath(), this.console);
 
         this.binaryState = false;
-        this.updateBattery();
-        intercom.onBatteryLevel.subscribe(() => this.updateBattery());
 
         intercom.onDing.subscribe(() => {
             this.lastDing = Date.now();
@@ -195,12 +193,6 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             }
             this.updateMotion();
         }, MOTION_POLL_MS);
-    }
-
-    updateBattery() {
-        const level = this.intercom.batteryLevel;
-        if (level != null)
-            this.batteryLevel = level;
     }
 
     resetVideoSource() {
@@ -276,7 +268,6 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             },
             audio: {},
             destinations: stream.id === 'main' ? ['local', 'local-recorder'] : ['remote', 'remote-recorder', 'low-resolution'],
-            // the intercom reports a battery, but the camera is mains powered: allow prebuffering.
             allowBatteryPrebuffer: true,
         }));
     }
@@ -301,7 +292,8 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
                 codec: source.find(s => s.id === this.getIntercomBaseStreamId(source))?.video?.codec,
             },
             audio: {
-                codec: 'aac',
+                // opus: Rebroadcast can not pass aac from mpegts on to its rtsp server.
+                codec: 'opus',
             },
             // no prebuffering: the stream holds a Ring live session while it is in use.
             allowBatteryPrebuffer: false,
@@ -427,10 +419,12 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
                 '-map', '0:v:0',
                 '-map', '0:a:0?',
                 '-c:v', 'copy',
-                '-c:a', 'aac',
+                // opus: Rebroadcast can not pass aac from mpegts on to its rtsp server.
+                '-c:a', 'libopus',
+                '-application', 'lowdelay',
                 '-ac', '1',
                 '-ar', '48000',
-                '-b:a', '64k',
+                '-b:a', '32k',
                 '-f', 'mpegts',
                 'pipe:1',
             ], {

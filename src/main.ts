@@ -161,8 +161,8 @@ class RingIntercomCameraPlugin extends ScryptedDeviceBase implements DeviceProvi
                     ScryptedInterface.MotionSensor,
                     ScryptedInterface.Settings,
                 ];
-                if (intercom.batteryLevel != null)
-                    interfaces.push(ScryptedInterface.Battery);
+                // the battery is reported on the door opener: on the doorbell, Rebroadcast would treat
+                // the (mains powered) camera as battery powered and stop prebuffering.
 
                 devices.push({
                     nativeId,
@@ -176,7 +176,9 @@ class RingIntercomCameraPlugin extends ScryptedDeviceBase implements DeviceProvi
                     nativeId: nativeId + LOCK_SUFFIX,
                     name: `${intercom.name} Türöffner`,
                     type: ScryptedDeviceType.Lock,
-                    interfaces: [ScryptedInterface.Lock],
+                    interfaces: intercom.batteryLevel != null
+                        ? [ScryptedInterface.Lock, ScryptedInterface.Battery]
+                        : [ScryptedInterface.Lock],
                     info,
                 });
             }

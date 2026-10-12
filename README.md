@@ -73,9 +73,9 @@ Die Türklingel bietet diese Streams an:
 | Stream | Video | Audio | Prebuffer |
 | --- | --- | --- | --- |
 | `Reolink Main` / `Reolink Sub` | Kamera | Mikrofon der Kamera | ja |
-| `Kamera + Ring Intercom Audio` | Kamera | **Türsprechstelle über Ring** | nein (nur bei Bedarf) |
+| `Kamera + Ring Intercom Audio` | Kamera | **Türsprechstelle über Ring** (nach dem Klingeln), sonst Kamera | nein (nur bei Bedarf) |
 
-Der Intercom-Stream baut nur während der Wiedergabe eine Ring-Live-Sitzung auf und beendet sie wenige Sekunden nach dem Schließen wieder. So wird der Akku des Intercoms geschont. Damit dieser Stream nicht dauerhaft gepuffert wird, meldet das Gerät einen Akku (`Battery`). Nur die Kamera-Streams sind mit `allowBatteryPrebuffer` freigegeben.
+Der Intercom-Stream baut nur während der Wiedergabe eine Ring-Live-Sitzung auf und beendet sie wenige Sekunden nach dem Schließen wieder. So wird der Akku des Intercoms geschont. Unter *Prebuffered Streams* darf deshalb nur `Reolink Main` angehakt sein. Der Akkustand des Intercoms wird beim Gerät *Türöffner* angezeigt, nicht bei der Türklingel. Sonst würde Rebroadcast die Kamera für akkubetrieben halten und das Vorpuffern abschalten. Der Ton im Intercom-Stream ist Opus.
 
 **Was hört man im Livebild?**
 
