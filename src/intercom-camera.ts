@@ -392,7 +392,9 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         let port: number;
         if (this.intercomActive) {
             this.console.log('live view with Ring Intercom audio');
-            port = await this.audio.createMuxedStreamServer(videoInputArguments);
+            // the stream from Rebroadcast may start with packets without (or with stuck)
+            // timestamps, which froze the picture. The arrival time is used instead.
+            port = await this.audio.createMuxedStreamServer(['-use_wallclock_as_timestamps', '1', ...videoInputArguments]);
         }
         else if (rebroadcastUrl) {
             // the camera stream as it is (video and audio), without ffmpeg. It only goes through

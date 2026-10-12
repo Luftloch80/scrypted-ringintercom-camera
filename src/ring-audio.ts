@@ -225,6 +225,9 @@ export class RingIntercomAudio {
                     ...videoInputArguments,
                     '-protocol_whitelist', 'pipe,udp,rtp,file,crypto',
                     '-thread_queue_size', '512',
+                    // the codec is known from the sdp, no need to wait for probing.
+                    '-analyzeduration', '0',
+                    '-probesize', '32',
                     '-f', 'sdp',
                     '-i', 'pipe:0',
                     '-map', '0:v:0',
