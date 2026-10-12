@@ -75,7 +75,7 @@ Die Türklingel bietet diese Streams an:
 | `Reolink Main` / `Reolink Sub` | Kamera | Mikrofon der Kamera | ja |
 | `Kamera + Ring Intercom Audio` | Kamera | **Türsprechstelle über Ring** (nach dem Klingeln), sonst Kamera | nein (nur bei Bedarf) |
 
-Der Intercom-Stream baut nur während der Wiedergabe eine Ring-Live-Sitzung auf und beendet sie wenige Sekunden nach dem Schließen wieder. So wird der Akku des Intercoms geschont. Unter *Prebuffered Streams* darf deshalb nur `Reolink Main` angehakt sein. Der Akkustand des Intercoms wird beim Gerät *Türöffner* angezeigt, nicht bei der Türklingel. Sonst würde Rebroadcast die Kamera für akkubetrieben halten und das Vorpuffern abschalten. Der Ton im Intercom-Stream ist Opus.
+Der Intercom-Stream baut nur während der Wiedergabe eine Ring-Live-Sitzung auf und beendet sie wenige Sekunden nach dem Schließen wieder. So wird der Akku des Intercoms geschont. Unter *Prebuffered Streams* darf deshalb nur `Reolink Main` angehakt sein. Der Akkustand des Intercoms wird beim Gerät *Türöffner* angezeigt, nicht bei der Türklingel. Sonst würde Rebroadcast die Kamera für akkubetrieben halten und das Vorpuffern abschalten. Der Ton im Intercom-Stream ist Opus. Das Bild für den Intercom-Stream holt sich das Plugin aus dem Rebroadcast-Puffer von `Reolink Main` und öffnet keine zweite Verbindung zur Kamera. Der RTSP-Server der Reolink bringt die Pakete zweier gleichzeitiger Verbindungen durcheinander (`bad cseq`), dann funktionieren beide nicht mehr.
 
 **Was hört man im Livebild?**
 

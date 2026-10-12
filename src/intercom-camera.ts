@@ -340,11 +340,7 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         const baseId = this.getIntercomBaseStreamId(source);
         if (!baseId)
             throw new Error('Keine Bildquelle konfiguriert.');
-        const base = await this.getSourceVideoStream({ id: baseId });
-        const baseInput = await mediaManager.convertMediaObjectToJSON<FFmpegInput>(base, ScryptedMimeTypes.FFmpegInput);
-        const videoInputArguments = baseInput.inputArguments?.length
-            ? baseInput.inputArguments
-            : ['-i', baseInput.url!];
+        const videoInputArguments = await this.getIntercomVideoInput(baseId);
 
         let port: number;
         if (this.intercomActive) {
@@ -366,6 +362,42 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             ],
         };
         return mediaManager.createFFmpegMediaObject(ffmpegInput);
+    }
+
+    /**
+     * The video for the intercom stream. It is taken from the Rebroadcast plugin (the stream
+     * it already keeps open for the camera), because the Reolink RTSP server mixes up the
+     * packets of two connections to the same stream ("bad cseq"), which breaks both.
+     */
+    private async getIntercomVideoInput(baseId: string): Promise<string[]> {
+        try {
+            const device = sdk.systemManager.getDeviceById<VideoCamera>(this.id);
+            const mo = await device.getVideoStream({ id: baseId });
+            const input = await mediaManager.convertMediaObjectToJSON<FFmpegInput>(mo, ScryptedMimeTypes.FFmpegInput);
+            const direct = this.getReolink().getStreams().map(s => s.url);
+            if (input.url && !direct.includes(input.url)) {
+                this.console.log('intercom stream video from Rebroadcast', input.url.replace(/\/\/[^@/]*@/, '//'));
+                if (input.url.startsWith('rtsp'))
+                    return [
+                        '-rtsp_transport', 'tcp',
+                        '-analyzeduration', '3000000',
+                        '-probesize', '5000000',
+                        '-i', input.url,
+                    ];
+                return input.inputArguments?.length ? input.inputArguments : ['-i', input.url];
+            }
+            this.console.warn(`Rebroadcast does not buffer the stream "${baseId}", the camera is opened directly. Enable it under Rebroadcast -> Prebuffered Streams.`);
+        }
+        catch (e) {
+            this.console.warn('Rebroadcast stream unavailable, the camera is opened directly:', (e as Error).message);
+        }
+        const stream = this.getReolink().getStreams().find(s => s.id === baseId) || this.getReolink().getStreams()[0];
+        return [
+            '-rtsp_transport', 'tcp',
+            '-analyzeduration', '3000000',
+            '-probesize', '5000000',
+            '-i', stream.url,
+        ];
     }
 
     private get intercomWindowMinutes() {
