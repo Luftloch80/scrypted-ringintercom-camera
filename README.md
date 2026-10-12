@@ -84,6 +84,13 @@ Der Intercom-Stream baut nur während der Wiedergabe eine Ring-Live-Sitzung auf 
 - Der Intercom-Stream steht immer an letzter Stelle und hat keine Auflösungsangabe. So wählt Rebroadcast ihn nie automatisch aus, zum Beispiel nicht für Aufnahmen.
 - Der Intercom-Stream liefert das Bild sofort. Bis Audio von Ring kommt, und auch wenn Ring die Sitzung ablehnt, läuft Stille mit.
 
+**Intercom nur nach dem Klingeln** (Einstellung *Intercom nach dem Klingeln aktiv (Minuten)*, Standard 5):
+
+- In den ersten Minuten nach einem Klingeln liefert der Stream `Kamera + Ring Intercom Audio` den Ton der Türsprechstelle, und Gegensprechen geht über den Ring Intercom.
+- Außerhalb dieser Zeit liefert derselbe Stream den Ton der Kamera, und Gegensprechen ist aus. Ein Livebild ohne vorheriges Klingeln baut also keine Ring-Sitzung auf.
+- Ist beim Klingeln noch ein Livebild mit Kamera-Ton offen, wird es beendet. Das nächste Livebild startet dann mit dem Intercom-Ton.
+- `0` bedeutet: Der Intercom ist immer aktiv (bisheriges Verhalten).
+
 **Gegensprechen** (HomeKit, Scrypted-App, WebRTC): Das Audio wird nach Opus (oder PCMU, je nachdem, was Ring aushandelt) umgewandelt und an den Lautsprecher der Türsprechstelle gesendet.
 
 ## HomeKit Secure Video

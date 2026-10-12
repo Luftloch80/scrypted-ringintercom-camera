@@ -1,3 +1,5 @@
+import { ChildProcess, spawn } from 'child_process';
+import net from 'net';
 import sdk, { Battery, BinarySensor, Camera, FFmpegInput, Intercom, MediaObject, MotionSensor, RequestMediaStreamOptions, RequestPictureOptions, ResponseMediaStreamOptions, ResponsePictureOptions, ScryptedDeviceBase, ScryptedInterface, ScryptedMimeTypes, Setting, Settings, SettingValue, VideoCamera } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import type { RingIntercom } from 'ring-client-api';
@@ -21,6 +23,9 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
     private dingMotionTimeout?: NodeJS.Timeout;
     private motionPoll?: NodeJS.Timeout;
     private motionPollFailed = false;
+    private lastDing = 0;
+    // streams with camera audio, ended when someone rings so the next live view uses the intercom.
+    private cameraAudioStreams = new Set<() => void>();
 
     storageSettings = new StorageSettings(this, {
         reolinkHost: {
@@ -77,7 +82,14 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             title: 'Intercom-Audio im Livebild',
             type: 'html',
             readonly: true,
-            defaultValue: '<p>Um im Livebild die Türsprechstelle zu hören: unter <b>Extensions → Rebroadcast</b> bei <i>Local Stream</i> und <i>Remote Stream</i> den Stream <b>Kamera + Ring Intercom Audio</b> wählen. <i>Remote Recording Stream</i> (HomeKit Secure Video) und <i>Local Recording Stream</i> müssen ein Kamera-Stream bleiben.</p>',
+            defaultValue: '<p>Damit das Livebild den Intercom nutzt: unter <b>Extensions → Rebroadcast</b> bei <i>Local Stream</i> und <i>Remote Stream</i> den Stream <b>Kamera + Ring Intercom Audio</b> wählen. <i>Remote Recording Stream</i> (HomeKit Secure Video) und <i>Local Recording Stream</i> müssen ein Kamera-Stream bleiben.</p><p>Nach einem Klingeln laufen Ton und Sprechen für die eingestellte Zeit über den Ring Intercom, sonst kommt der Ton von der Kamera und Sprechen ist aus.</p>',
+        },
+        intercomWindowMinutes: {
+            group: 'Intercom',
+            title: 'Intercom nach dem Klingeln aktiv (Minuten)',
+            description: 'So lange nach einem Klingeln laufen Ton und Sprechen über den Ring Intercom. Danach kommt der Ton im Livebild von der Kamera und Sprechen ist aus. 0 = Intercom immer aktiv.',
+            type: 'number',
+            defaultValue: 5,
         },
         intercomStreamBase: {
             group: 'Intercom',
@@ -121,7 +133,13 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         intercom.onBatteryLevel.subscribe(() => this.updateBattery());
 
         intercom.onDing.subscribe(() => {
-            this.console.log('Ring Intercom ding');
+            this.lastDing = Date.now();
+            const minutes = this.intercomWindowMinutes;
+            this.console.log('Ring Intercom ding' + (minutes > 0 ? `, intercom audio active for ${minutes} minutes` : ''));
+            // a live view with camera audio may still be open (or kept by Rebroadcast): end it,
+            // the next one is started with the intercom audio.
+            for (const end of [...this.cameraAudioStreams])
+                end();
             this.binaryState = true;
             clearTimeout(this.dingTimeout);
             const seconds = parseFloat(this.storageSettings.values.dingResetSeconds) || DING_RESET_MS / 1000;
@@ -336,7 +354,15 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             ? baseInput.inputArguments
             : ['-i', baseInput.url!];
 
-        const port = await this.audio.createMuxedStreamServer(videoInputArguments);
+        let port: number;
+        if (this.intercomActive) {
+            this.console.log('live view with Ring Intercom audio');
+            port = await this.audio.createMuxedStreamServer(videoInputArguments);
+        }
+        else {
+            this.console.log('live view with camera audio (no recent ding)');
+            port = await this.createCameraAudioStreamServer(videoInputArguments);
+        }
         const url = `tcp://127.0.0.1:${port}`;
         const ffmpegInput: FFmpegInput = {
             url,
@@ -350,8 +376,80 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         return mediaManager.createFFmpegMediaObject(ffmpegInput);
     }
 
+    private get intercomWindowMinutes() {
+        const minutes = parseFloat(this.storageSettings.values.intercomWindowMinutes);
+        return Number.isFinite(minutes) ? minutes : 5;
+    }
+
+    /**
+     * Whether the Ring Intercom is used for audio and talking right now.
+     */
+    get intercomActive() {
+        const minutes = this.intercomWindowMinutes;
+        if (minutes <= 0)
+            return true;
+        return Date.now() - this.lastDing < minutes * 60 * 1000;
+    }
+
+    /**
+     * The intercom stream outside of the intercom window: the camera video and audio,
+     * in the same format (mpegts, aac) as the stream with the intercom audio.
+     */
+    private async createCameraAudioStreamServer(videoInputArguments: string[]): Promise<number> {
+        const server = net.createServer();
+        await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+        const port = (server.address() as net.AddressInfo).port;
+        const connectTimeout = setTimeout(() => server.close(), 30000);
+        const ffmpegPath = await mediaManager.getFFmpegPath();
+
+        server.once('connection', client => {
+            clearTimeout(connectTimeout);
+            server.close();
+
+            let cp: ChildProcess | undefined;
+            const end = () => {
+                this.cameraAudioStreams.delete(end);
+                try {
+                    cp?.kill('SIGKILL');
+                }
+                catch (e) {
+                }
+                client.destroy();
+            };
+            this.cameraAudioStreams.add(end);
+            client.on('close', end);
+            client.on('error', end);
+
+            cp = spawn(ffmpegPath, [
+                '-hide_banner',
+                '-loglevel', 'warning',
+                ...videoInputArguments,
+                '-map', '0:v:0',
+                '-map', '0:a:0?',
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-ac', '1',
+                '-ar', '48000',
+                '-b:a', '64k',
+                '-f', 'mpegts',
+                'pipe:1',
+            ], {
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            cp.stderr!.on('data', data => this.console.log('[camera-stream]', data.toString().trim()));
+            cp.on('exit', end);
+            cp.stdout!.pipe(client);
+        });
+
+        return port;
+    }
+
     // Intercom (two way audio) via Ring
     async startIntercom(media: MediaObject): Promise<void> {
+        if (!this.intercomActive) {
+            this.console.log(`two way audio ignored: the intercom is only active for ${this.intercomWindowMinutes} minutes after a ding`);
+            return;
+        }
         const ffmpegInput = await mediaManager.convertMediaObjectToJSON<FFmpegInput>(media, ScryptedMimeTypes.FFmpegInput);
         const inputArguments = ffmpegInput.inputArguments?.length
             ? ffmpegInput.inputArguments
@@ -364,6 +462,8 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
     }
 
     release() {
+        for (const end of [...this.cameraAudioStreams])
+            end();
         clearTimeout(this.dingTimeout);
         clearTimeout(this.dingMotionTimeout);
         this.stopMotion();
