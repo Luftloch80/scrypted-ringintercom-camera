@@ -16,6 +16,8 @@ const isIntercomStream = (id?: string) => id === INTERCOM_STREAM_ID || id === IN
 const DING_RESET_MS = 10000;
 // Ring delivers missed notifications again after a reconnect.
 const MAX_DING_AGE_MS = 60000;
+const SNAPSHOT_FRESH_MS = 10000;
+const SNAPSHOT_REFRESH_MS = 60000;
 
 // the camera sends a key frame only every few seconds, ffmpeg must wait for it.
 function rtspInput(url: string) {
@@ -41,6 +43,9 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
     private motionPoll?: NodeJS.Timeout;
     private motionPollFailed = false;
     private lastDing = 0;
+    private lastSnapshot?: { jpeg: Buffer, time: number };
+    private snapshotPromise?: Promise<Buffer>;
+    private snapshotRefresh?: NodeJS.Timeout;
     // streams with camera audio, ended when someone rings so the next live view uses the intercom.
     private cameraAudioStreams = new Set<() => void>();
 
@@ -175,6 +180,8 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
 
         this.motionDetected = false;
         this.startMotion();
+
+        this.snapshotRefresh = setInterval(() => this.fetchSnapshot().catch(() => { }), SNAPSHOT_REFRESH_MS);
     }
 
     /**
@@ -279,8 +286,39 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
 
     // Camera (snapshots come from the video camera, the intercom has none).
     async takePicture(options?: RequestPictureOptions): Promise<MediaObject> {
-        const jpeg = await this.getReolink().jpegSnapshot(options?.timeout);
+        const jpeg = await this.getSnapshot(options?.timeout);
         return this.createMediaObject(jpeg, 'image/jpeg');
+    }
+
+    /**
+     * The Home app shows the camera tile only once the snapshot arrives. A recent picture is kept,
+     * so the tile appears right away: it is returned when the camera does not answer within 2s
+     * (or fails), and refreshed in the background every minute.
+     */
+    private async getSnapshot(timeout?: number): Promise<Buffer> {
+        const cached = this.lastSnapshot;
+        if (cached && Date.now() - cached.time < SNAPSHOT_FRESH_MS)
+            return cached.jpeg;
+
+        const fresh = this.fetchSnapshot(timeout);
+        if (!cached)
+            return fresh;
+        return Promise.race([
+            fresh.catch(() => cached.jpeg),
+            new Promise<Buffer>(resolve => setTimeout(() => resolve(cached.jpeg), 2000)),
+        ]);
+    }
+
+    private fetchSnapshot(timeout?: number): Promise<Buffer> {
+        if (!this.snapshotPromise) {
+            this.snapshotPromise = this.getReolink().jpegSnapshot(timeout)
+                .then(jpeg => {
+                    this.lastSnapshot = { jpeg, time: Date.now() };
+                    return jpeg;
+                })
+                .finally(() => this.snapshotPromise = undefined);
+        }
+        return this.snapshotPromise;
     }
 
     async getPictureOptions(): Promise<ResponsePictureOptions[]> {
@@ -611,6 +649,7 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
     }
 
     release() {
+        clearInterval(this.snapshotRefresh);
         for (const end of [...this.cameraAudioStreams])
             end();
         clearTimeout(this.dingTimeout);
