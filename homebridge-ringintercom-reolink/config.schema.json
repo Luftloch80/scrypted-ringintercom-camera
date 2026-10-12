@@ -1,0 +1,238 @@
+{
+  "pluginAlias": "RingIntercomReolink",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Ring Intercom als HomeKit-Türklingel mit dem Bild einer Reolink-Kamera, HomeKit Secure Video, Gegensprechen über den Intercom und Türöffner. Die Türklingel erscheint als eigenes Gerät: nach dem Neustart in der Home-App über **+ → Gerät hinzufügen → Weitere Optionen** mit dem Homebridge-Code hinzufügen.",
+  "footerDisplay": "Den Ring Refresh Token erzeugst du auf dem Pi mit `npx -p ring-client-api ring-auth-cli`.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "Ring Intercom Reolink",
+        "required": true
+      },
+      "refreshToken": {
+        "title": "Ring Refresh Token",
+        "type": "string",
+        "description": "Erzeugen mit: npx -p ring-client-api ring-auth-cli. Ring erneuert den Token regelmäßig, das Plugin speichert den jeweils neuesten selbst.",
+        "required": true
+      },
+      "ffmpegPath": {
+        "title": "ffmpeg-Pfad (optional)",
+        "type": "string",
+        "description": "Leer lassen: ffmpeg-for-homebridge bzw. ffmpeg aus dem System."
+      },
+      "debug": {
+        "title": "Ausführliches Log",
+        "type": "boolean",
+        "default": false
+      },
+      "cameras": {
+        "title": "Türklingeln",
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "title": "Name in HomeKit",
+              "type": "string",
+              "placeholder": "Vordereingang"
+            },
+            "intercom": {
+              "title": "Ring Intercom (Name oder ID)",
+              "type": "string",
+              "description": "Leer lassen, wenn es nur ein Intercom im Ring-Konto gibt."
+            },
+            "reolinkHost": {
+              "title": "Reolink IP-Adresse",
+              "type": "string",
+              "placeholder": "192.168.0.42",
+              "required": true
+            },
+            "reolinkUsername": {
+              "title": "Reolink Benutzer",
+              "type": "string",
+              "default": "admin"
+            },
+            "reolinkPassword": {
+              "title": "Reolink Passwort",
+              "type": "string",
+              "x-schema-form": {
+                "type": "password"
+              }
+            },
+            "reolinkChannel": {
+              "title": "Kanal",
+              "type": "integer",
+              "default": 0,
+              "description": "0 bei einzelnen Kameras, sonst der Kanal am NVR/Hub."
+            },
+            "reolinkProtocol": {
+              "title": "Stream-Protokoll",
+              "type": "string",
+              "default": "rtsp",
+              "oneOf": [
+                { "title": "RTSP (Standard)", "enum": ["rtsp"] },
+                { "title": "HTTP-FLV (stabiler bei manchen Reolink-Modellen)", "enum": ["flv"] },
+                { "title": "RTMP", "enum": ["rtmp"] }
+              ],
+              "description": "Wenn das Bild hängt oder die Verbindung ständig abbricht, HTTP-FLV probieren. Dafür muss in der Reolink-App unter Netzwerk → Erweitert → Server-Einstellungen HTTP und RTMP aktiv sein."
+            },
+            "reolinkRtspPort": {
+              "title": "RTSP-Port",
+              "type": "integer",
+              "default": 554
+            },
+            "reolinkRtspPath": {
+              "title": "RTSP-Pfad",
+              "type": "string",
+              "default": "h264Preview",
+              "oneOf": [
+                { "title": "h264Preview (Standard)", "enum": ["h264Preview"] },
+                { "title": "h265Preview (nur wenn die Kamera H.265 sendet, HomeKit braucht H.264)", "enum": ["h265Preview"] },
+                { "title": "Preview", "enum": ["Preview"] }
+              ]
+            },
+            "reolinkHttps": {
+              "title": "HTTPS für die Reolink-API",
+              "type": "boolean",
+              "default": false
+            },
+            "liveStream": {
+              "title": "Stream für das Livebild",
+              "type": "string",
+              "default": "main",
+              "oneOf": [
+                { "title": "Main (volle Auflösung)", "enum": ["main"] },
+                { "title": "Sub (geringe Auflösung, schont WLAN/Mobilfunk)", "enum": ["sub"] }
+              ]
+            },
+            "recordingStream": {
+              "title": "Stream für HomeKit Secure Video",
+              "type": "string",
+              "default": "main",
+              "oneOf": [
+                { "title": "Main", "enum": ["main"] },
+                { "title": "Sub", "enum": ["sub"] }
+              ]
+            },
+            "intercomAudio": {
+              "title": "Ton vom Ring Intercom",
+              "type": "boolean",
+              "default": true,
+              "description": "Im Livebild ist der Ton des Intercoms zu hören (statt des Kamera-Mikrofons)."
+            },
+            "twoWayAudio": {
+              "title": "Gegensprechen über den Intercom",
+              "type": "boolean",
+              "default": true
+            },
+            "motion": {
+              "title": "Bewegungsmelder der Kamera (für HKSV)",
+              "type": "boolean",
+              "default": true
+            },
+            "motionPollSeconds": {
+              "title": "Bewegung abfragen alle (Sekunden)",
+              "type": "integer",
+              "default": 2,
+              "minimum": 1
+            },
+            "dingTriggersMotion": {
+              "title": "Klingeln meldet zusätzlich Bewegung",
+              "type": "boolean",
+              "default": false,
+              "description": "Normalerweise nicht nötig: HKSV kann direkt beim Klingeln aufnehmen."
+            },
+            "motionResetSeconds": {
+              "title": "Dauer der Klingel-Bewegung (Sekunden)",
+              "type": "integer",
+              "default": 10
+            },
+            "lock": {
+              "title": "Türöffner anzeigen",
+              "type": "boolean",
+              "default": true
+            },
+            "unlockSeconds": {
+              "title": "Türöffner zeigt „offen“ für (Sekunden)",
+              "type": "integer",
+              "default": 5
+            }
+          }
+        }
+      }
+    }
+  },
+  "layout": [
+    "name",
+    "refreshToken",
+    {
+      "key": "cameras",
+      "type": "array",
+      "orderable": false,
+      "buttonText": "Türklingel hinzufügen",
+      "items": [
+        "cameras[].name",
+        "cameras[].intercom",
+        {
+          "type": "fieldset",
+          "title": "Reolink-Kamera",
+          "items": [
+            "cameras[].reolinkHost",
+            "cameras[].reolinkUsername",
+            "cameras[].reolinkPassword",
+            "cameras[].reolinkProtocol",
+            "cameras[].liveStream",
+            "cameras[].recordingStream"
+          ]
+        },
+        {
+          "type": "fieldset",
+          "title": "Intercom",
+          "items": [
+            "cameras[].intercomAudio",
+            "cameras[].twoWayAudio",
+            "cameras[].lock",
+            "cameras[].unlockSeconds"
+          ]
+        },
+        {
+          "type": "fieldset",
+          "title": "Bewegung (HomeKit Secure Video)",
+          "items": [
+            "cameras[].motion",
+            "cameras[].motionPollSeconds",
+            "cameras[].dingTriggersMotion",
+            "cameras[].motionResetSeconds"
+          ]
+        },
+        {
+          "type": "fieldset",
+          "title": "Erweitert",
+          "expandable": true,
+          "expanded": false,
+          "items": [
+            "cameras[].reolinkChannel",
+            "cameras[].reolinkRtspPort",
+            "cameras[].reolinkRtspPath",
+            "cameras[].reolinkHttps"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Erweitert",
+      "expandable": true,
+      "expanded": false,
+      "items": [
+        "ffmpegPath",
+        "debug"
+      ]
+    }
+  ]
+}

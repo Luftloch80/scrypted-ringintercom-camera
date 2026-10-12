@@ -14,6 +14,26 @@ Dieses Plugin verbindet einen **Ring Intercom** mit dem Bild einer **Reolink-Kam
 Der Code basiert auf dem offiziellen [Scrypted Ring Plugin](https://github.com/koush/scrypted/tree/main/plugins/ring) (Login, 2FA, Refresh-Token) und dem [Scrypted Reolink Plugin](https://github.com/koush/scrypted/tree/main/plugins/reolink) (RTSP-Streams, Snapshot-API). Für Ring wird [`ring-client-api`](https://github.com/dgreif/ring) verwendet.
 Das offizielle Ring-Plugin erkennt Intercoms gar nicht. Dieses Plugin nutzt die Intercom-Unterstützung von `ring-client-api` (Klingel, Türöffner) und baut die Live-Audio-Sitzung über dieselbe WebRTC-Signalisierung auf, die Ring auch für Kameras verwendet.
 
+## Neu: Homebridge-Variante (ohne Scrypted)
+
+Unter [`homebridge-ringintercom-reolink/`](homebridge-ringintercom-reolink/) gibt es dieselben Funktionen als **Homebridge-Plugin**:
+
+- Livebild
+- HomeKit Secure Video mit eigenem Rebroadcast-Puffer
+- Klingel
+- Ton und Gegensprechen über den Intercom
+- Türöffner
+
+Wer Scrypted nur für diese Türklingel nutzt, kann Scrypted damit ganz ersetzen. Installation auf dem Pi, ohne Build:
+
+```bash
+cd ~/scrypted-ringintercom-camera
+git pull
+sh install-homebridge-plugin.sh
+```
+
+Einrichtung und Ring-Token: siehe [homebridge-ringintercom-reolink/README.md](homebridge-ringintercom-reolink/README.md).
+
 ## Installation
 
 ### Fertig gebaut (empfohlen, z. B. auf dem Raspberry Pi)
