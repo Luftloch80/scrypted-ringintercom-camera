@@ -11,6 +11,8 @@ const { mediaManager } = sdk;
 
 export const INTERCOM_STREAM_ID = 'ring-intercom';
 const DING_RESET_MS = 10000;
+// Ring delivers missed notifications again after a reconnect.
+const MAX_DING_AGE_MS = 60000;
 
 // the camera sends a key frame only every few seconds, ffmpeg must wait for it.
 function rtspInput(url: string) {
@@ -142,6 +144,8 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
 
         this.binaryState = false;
 
+        this.filterOldDings(intercom);
+
         intercom.onDing.subscribe(() => {
             this.lastDing = Date.now();
             const minutes = this.intercomWindowMinutes;
@@ -168,6 +172,36 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
 
         this.motionDetected = false;
         this.startMotion();
+    }
+
+    /**
+     * Ring's push server delivers the notifications of the last hours again when the plugin
+     * (re)connects. ring-client-api passes them on as new dings, so old and repeated ones are dropped here.
+     */
+    private filterOldDings(intercom: RingIntercom) {
+        const seen = new Set<string>();
+        const process = intercom.processPushNotification.bind(intercom);
+        intercom.processPushNotification = (notification: any) => {
+            const event = notification?.data?.event;
+            const id: string | undefined = event?.ding?.id;
+            const created = Date.parse(event?.ding?.created_at || '')
+                || event?.eventito?.timestamp
+                || notification?.analytics?.triggered_at;
+            if (event && created && Date.now() - created > MAX_DING_AGE_MS) {
+                this.console.log(`ignoring old Ring notification from ${new Date(created).toLocaleString()}`);
+                return;
+            }
+            if (id) {
+                if (seen.has(id)) {
+                    this.console.log('ignoring repeated Ring notification');
+                    return;
+                }
+                seen.add(id);
+                if (seen.size > 100)
+                    seen.delete(seen.values().next().value!);
+            }
+            process(notification);
+        };
     }
 
     private updateMotion() {

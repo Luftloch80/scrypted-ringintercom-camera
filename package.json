@@ -1,6 +1,6 @@
 {
    "name": "@luftloch80/scrypted-ringintercom-camera",
-   "version": "0.4.4",
+   "version": "0.4.5",
    "description": "Ring Intercom (Klingel, 2-Wege-Audio, T\u00fcr\u00f6ffner) kombiniert mit dem Bild einer Reolink-Kamera als ein T\u00fcrklingel-Ger\u00e4t in Scrypted.",
    "author": "Luftloch80",
    "license": "MIT",
