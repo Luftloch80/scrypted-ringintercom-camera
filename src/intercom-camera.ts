@@ -11,6 +11,16 @@ const { mediaManager } = sdk;
 
 export const INTERCOM_STREAM_ID = 'ring-intercom';
 const DING_RESET_MS = 10000;
+
+// the camera sends a key frame only every few seconds, ffmpeg must wait for it.
+function rtspInput(url: string) {
+    return [
+        '-rtsp_transport', 'tcp',
+        '-analyzeduration', '15000000',
+        '-probesize', '20000000',
+        '-i', url,
+    ];
+}
 const MOTION_POLL_MS = 2000;
 
 export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamera, Camera, Intercom, BinarySensor, MotionSensor, Settings {
@@ -340,12 +350,31 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         const baseId = this.getIntercomBaseStreamId(source);
         if (!baseId)
             throw new Error('Keine Bildquelle konfiguriert.');
-        const videoInputArguments = await this.getIntercomVideoInput(baseId);
+        const { args: videoInputArguments, rebroadcastUrl } = await this.getIntercomVideoInput(baseId);
+        const mediaStreamOptions = vsos.find(v => v.id === INTERCOM_STREAM_ID)!;
 
         let port: number;
         if (this.intercomActive) {
             this.console.log('live view with Ring Intercom audio');
             port = await this.audio.createMuxedStreamServer(videoInputArguments);
+        }
+        else if (rebroadcastUrl) {
+            // the camera stream as it is (video and audio), without ffmpeg. It only goes through
+            // a local proxy, so the session can be ended when someone rings.
+            this.console.log('live view with camera audio (no recent ding)');
+            const url = await this.createCameraProxy(rebroadcastUrl);
+            const base = vsos.find(v => v.id === baseId);
+            const ffmpegInput: FFmpegInput = {
+                url,
+                container: 'rtsp',
+                mediaStreamOptions: {
+                    ...mediaStreamOptions,
+                    container: 'rtsp',
+                    audio: base?.audio || { codec: 'aac' },
+                },
+                inputArguments: rtspInput(url),
+            };
+            return mediaManager.createFFmpegMediaObject(ffmpegInput);
         }
         else {
             this.console.log('live view with camera audio (no recent ding)');
@@ -355,7 +384,7 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         const ffmpegInput: FFmpegInput = {
             url,
             container: 'mpegts',
-            mediaStreamOptions: vsos.find(v => v.id === INTERCOM_STREAM_ID),
+            mediaStreamOptions,
             inputArguments: [
                 '-f', 'mpegts',
                 '-i', url,
@@ -369,7 +398,7 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
      * it already keeps open for the camera), because the Reolink RTSP server mixes up the
      * packets of two connections to the same stream ("bad cseq"), which breaks both.
      */
-    private async getIntercomVideoInput(baseId: string): Promise<string[]> {
+    private async getIntercomVideoInput(baseId: string): Promise<{ args: string[], rebroadcastUrl?: string }> {
         try {
             const device = sdk.systemManager.getDeviceById<VideoCamera>(this.id);
             const mo = await device.getVideoStream({ id: baseId });
@@ -378,13 +407,8 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             if (input.url && !direct.includes(input.url)) {
                 this.console.log('intercom stream video from Rebroadcast', input.url.replace(/\/\/[^@/]*@/, '//'));
                 if (input.url.startsWith('rtsp'))
-                    return [
-                        '-rtsp_transport', 'tcp',
-                        '-analyzeduration', '3000000',
-                        '-probesize', '5000000',
-                        '-i', input.url,
-                    ];
-                return input.inputArguments?.length ? input.inputArguments : ['-i', input.url];
+                    return { args: rtspInput(input.url), rebroadcastUrl: input.url };
+                return { args: input.inputArguments?.length ? input.inputArguments : ['-i', input.url] };
             }
             this.console.warn(`Rebroadcast does not buffer the stream "${baseId}", the camera is opened directly. Enable it under Rebroadcast -> Prebuffered Streams.`);
         }
@@ -392,12 +416,7 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             this.console.warn('Rebroadcast stream unavailable, the camera is opened directly:', (e as Error).message);
         }
         const stream = this.getReolink().getStreams().find(s => s.id === baseId) || this.getReolink().getStreams()[0];
-        return [
-            '-rtsp_transport', 'tcp',
-            '-analyzeduration', '3000000',
-            '-probesize', '5000000',
-            '-i', stream.url,
-        ];
+        return { args: rtspInput(stream.url) };
     }
 
     private get intercomWindowMinutes() {
@@ -413,6 +432,51 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         if (minutes <= 0)
             return true;
         return Date.now() - this.lastDing < minutes * 60 * 1000;
+    }
+
+    /**
+     * A local tcp proxy to the Rebroadcast rtsp server, returns the rtsp url to use instead.
+     * The connections are closed when someone rings, so the next live view uses the intercom.
+     */
+    private async createCameraProxy(rtspUrl: string): Promise<string> {
+        const target = new URL(rtspUrl);
+        const sockets = new Set<net.Socket>();
+        const server = net.createServer(client => {
+            clearTimeout(idleTimeout);
+            const upstream = net.connect(parseInt(target.port) || 554, target.hostname);
+            sockets.add(client);
+            sockets.add(upstream);
+            const close = () => {
+                client.destroy();
+                upstream.destroy();
+                sockets.delete(client);
+                sockets.delete(upstream);
+                // the proxy is only needed as long as Rebroadcast is connected.
+                if (!sockets.size) {
+                    clearTimeout(idleTimeout);
+                    idleTimeout = setTimeout(end, 10000);
+                }
+            };
+            client.on('close', close);
+            client.on('error', close);
+            upstream.on('close', close);
+            upstream.on('error', close);
+            client.pipe(upstream);
+            upstream.pipe(client);
+        });
+        const end = () => {
+            clearTimeout(idleTimeout);
+            this.cameraAudioStreams.delete(end);
+            server.close();
+            for (const socket of sockets)
+                socket.destroy();
+            sockets.clear();
+        };
+        let idleTimeout = setTimeout(end, 30000);
+        this.cameraAudioStreams.add(end);
+        await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+        const port = (server.address() as net.AddressInfo).port;
+        return `rtsp://127.0.0.1:${port}${target.pathname}${target.search}`;
     }
 
     /**
