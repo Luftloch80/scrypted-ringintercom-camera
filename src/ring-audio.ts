@@ -224,6 +224,7 @@ export class RingIntercomAudio {
                     '-loglevel', 'warning',
                     ...videoInputArguments,
                     '-protocol_whitelist', 'pipe,udp,rtp,file,crypto',
+                    '-thread_queue_size', '512',
                     '-f', 'sdp',
                     '-i', 'pipe:0',
                     '-map', '0:v:0',

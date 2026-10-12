@@ -16,6 +16,8 @@ const DING_RESET_MS = 10000;
 function rtspInput(url: string) {
     return [
         '-rtsp_transport', 'tcp',
+        // a full queue makes ffmpeg drop packets (frozen picture).
+        '-thread_queue_size', '1024',
         '-analyzeduration', '15000000',
         '-probesize', '20000000',
         '-i', url,
