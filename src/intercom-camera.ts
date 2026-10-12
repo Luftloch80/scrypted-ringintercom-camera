@@ -10,6 +10,9 @@ import { RingIntercomAudio } from './ring-audio';
 const { mediaManager } = sdk;
 
 export const INTERCOM_STREAM_ID = 'ring-intercom';
+// the same with the sub stream, for the remote stream (mobile network).
+export const INTERCOM_SUB_STREAM_ID = 'ring-intercom-sub';
+const isIntercomStream = (id?: string) => id === INTERCOM_STREAM_ID || id === INTERCOM_SUB_STREAM_ID;
 const DING_RESET_MS = 10000;
 // Ring delivers missed notifications again after a reconnect.
 const MAX_DING_AGE_MS = 60000;
@@ -108,7 +111,7 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         intercomStreamBase: {
             group: 'Intercom',
             title: 'Video für Intercom-Stream',
-            description: 'Welcher Kamera-Stream mit dem Intercom-Audio kombiniert wird.',
+            description: 'Welcher Kamera-Stream im Stream "Kamera + Ring Intercom Audio" verwendet wird. "Kamera Sub + Ring Intercom Audio" nutzt immer den Sub-Stream (für den Remote Stream).',
             choices: ['Main', 'Sub'],
             defaultValue: 'Main',
             onPut: () => this.onDeviceEvent(ScryptedInterface.VideoCamera, undefined),
@@ -327,15 +330,15 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             this.console.warn((e as Error).message);
         }
 
-        const intercomStream: ResponseMediaStreamOptions = {
-            id: INTERCOM_STREAM_ID,
-            name: 'Kamera + Ring Intercom Audio',
+        const intercomStream = (id: string, name: string): ResponseMediaStreamOptions => ({
+            id,
+            name,
             container: 'mpegts',
             tool: 'ffmpeg',
             video: {
                 // no resolution on purpose: Rebroadcast then never picks this stream automatically
                 // (e.g. for HomeKit Secure Video), it has to be selected explicitly.
-                codec: source.find(s => s.id === this.getIntercomBaseStreamId(source))?.video?.codec,
+                codec: source.find(s => s.id === this.getIntercomBaseStreamId(source, id))?.video?.codec,
             },
             audio: {
                 // opus: Rebroadcast can not pass aac from mpegts on to its rtsp server.
@@ -343,16 +346,19 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
             },
             // no prebuffering: the stream holds a Ring live session while it is in use.
             allowBatteryPrebuffer: false,
-        };
+        });
 
-        // the intercom stream is always last, so it is never the default stream.
-        return [...source, intercomStream];
+        // the intercom streams are always last, so they are never the default stream.
+        const streams = [...source, intercomStream(INTERCOM_STREAM_ID, 'Kamera + Ring Intercom Audio')];
+        if (source.length > 1)
+            streams.push(intercomStream(INTERCOM_SUB_STREAM_ID, 'Kamera Sub + Ring Intercom Audio'));
+        return streams;
     }
 
-    private getIntercomBaseStreamId(source: ResponseMediaStreamOptions[]) {
+    private getIntercomBaseStreamId(source: ResponseMediaStreamOptions[], intercomStreamId: string) {
         if (!source.length)
             return undefined;
-        if (this.storageSettings.values.intercomStreamBase === 'Sub')
+        if (intercomStreamId === INTERCOM_SUB_STREAM_ID || this.storageSettings.values.intercomStreamBase === 'Sub')
             return (source[1] || source[0]).id;
         return source[0].id;
     }
@@ -379,15 +385,15 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         const id = options?.id || vsos[0]?.id;
         this.console.log('video stream requested', id);
 
-        if (id !== INTERCOM_STREAM_ID)
+        if (!isIntercomStream(id))
             return this.getSourceVideoStream({ ...options, id });
 
-        const source = vsos.filter(v => v.id !== INTERCOM_STREAM_ID);
-        const baseId = this.getIntercomBaseStreamId(source);
+        const source = vsos.filter(v => !isIntercomStream(v.id));
+        const baseId = this.getIntercomBaseStreamId(source, id);
         if (!baseId)
             throw new Error('Keine Bildquelle konfiguriert.');
         const { args: videoInputArguments, rebroadcastUrl } = await this.getIntercomVideoInput(baseId);
-        const mediaStreamOptions = vsos.find(v => v.id === INTERCOM_STREAM_ID)!;
+        const mediaStreamOptions = vsos.find(v => v.id === id)!;
 
         let port: number;
         if (this.intercomActive) {

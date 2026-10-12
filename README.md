@@ -80,7 +80,7 @@ Der Intercom-Stream baut nur während der Wiedergabe eine Ring-Live-Sitzung auf 
 **Was hört man im Livebild?**
 
 - Standard: das Mikrofon der Kamera. Gegensprechen geht trotzdem immer über den Ring Intercom.
-- Wenn man im Livebild die Türsprechstelle hören möchte: in der Türklingel unter **Extensions → Rebroadcast** bei *Local Stream* und *Remote Stream* den Stream `Kamera + Ring Intercom Audio` auswählen. *Remote Recording Stream* (HKSV) und *Local Recording Stream* bleiben Kamera-Streams.
+- Wenn man im Livebild die Türsprechstelle hören möchte: in der Türklingel unter **Extensions → Rebroadcast** bei *Local Stream* und *Remote Stream* den Stream `Kamera + Ring Intercom Audio` auswählen, bei *Remote Stream* besser `Kamera Sub + Ring Intercom Audio` (kleinere Auflösung, geht über das Mobilnetz deutlich schneller). Dafür in *Prebuffered Streams* zusätzlich `Reolink Sub` anhaken. *Remote Recording Stream* (HKSV) und *Local Recording Stream* bleiben Kamera-Streams.
 - Der Intercom-Stream steht immer an letzter Stelle und hat keine Auflösungsangabe. So wählt Rebroadcast ihn nie automatisch aus, zum Beispiel nicht für Aufnahmen.
 - Der Intercom-Stream liefert das Bild sofort. Bis Audio von Ring kommt, und auch wenn Ring die Sitzung ablehnt, läuft Stille mit.
 
