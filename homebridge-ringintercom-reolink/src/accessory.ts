@@ -8,6 +8,11 @@ import { RingIntercomAudio } from './ring-audio.js';
 import type { CameraConfig } from './settings.js';
 import { StreamingDelegate } from './streaming.js';
 
+function firmwareVersion(value: unknown) {
+    const match = String(value ?? '').match(/\d+(\.\d+){0,2}/);
+    return match ? match[0] : '1.0.0';
+}
+
 // enough for the HKSV prebuffer (4s) plus one GOP.
 const PREBUFFER_MS = 10000;
 const SUB_STREAM_IDLE_MS = 30000;
@@ -49,7 +54,8 @@ export class IntercomDoorbell {
             .setCharacteristic(hap.Characteristic.Manufacturer, 'Ring / Reolink')
             .setCharacteristic(hap.Characteristic.Model, `${intercom.deviceType} + Reolink`)
             .setCharacteristic(hap.Characteristic.SerialNumber, String((intercom.data as any).device_id || intercom.id))
-            .setCharacteristic(hap.Characteristic.FirmwareRevision, String((intercom.data as any).firmware_version || '1.0'));
+            // HomeKit only accepts numeric versions (x.y.z), Ring reports e.g. "Up To Date".
+            .setCharacteristic(hap.Characteristic.FirmwareRevision, firmwareVersion((intercom.data as any).firmware_version));
 
         if (config.intercomAudio !== false)
             this.audio = new RingIntercomAudio(getRingApi, intercom, ffmpegPath, log);
