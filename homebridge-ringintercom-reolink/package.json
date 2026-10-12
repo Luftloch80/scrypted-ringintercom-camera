@@ -1,7 +1,7 @@
 {
   "name": "homebridge-ringintercom-reolink",
   "displayName": "Ring Intercom + Reolink",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Ring Intercom als HomeKit-T\u00fcrklingel mit dem Bild einer Reolink-Kamera, HomeKit Secure Video, Gegensprechen \u00fcber den Intercom und T\u00fcr\u00f6ffner.",
   "type": "module",
   "main": "dist/index.js",

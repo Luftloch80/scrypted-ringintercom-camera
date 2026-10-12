@@ -111,6 +111,7 @@ export class RingIntercomReolinkPlatform implements DynamicPlatformPlugin {
         }
 
         const accessories: PlatformAccessory[] = [];
+        const used = new Set<number>();
         for (const camera of cameras) {
             const intercom = this.findIntercom(intercoms, camera);
             if (!intercom) {
@@ -118,9 +119,15 @@ export class RingIntercomReolinkPlatform implements DynamicPlatformPlugin {
                 continue;
             }
             if (!camera.reolinkHost) {
-                this.log.error(`${camera.name || intercom.name}: reolinkHost is missing.`);
+                this.log.warn(`${camera.name || intercom.name}: no Reolink IP address configured, entry skipped.`);
                 continue;
             }
+            // two doorbells for the same intercom would get the same HomeKit identity.
+            if (used.has(intercom.id)) {
+                this.log.warn(`${camera.name || intercom.name}: Ring Intercom "${intercom.name}" is already used by another entry, entry skipped. Remove duplicate entries in the plugin settings.`);
+                continue;
+            }
+            used.add(intercom.id);
 
             const name = camera.name || intercom.name;
             const uuid = this.api.hap.uuid.generate(`${PLUGIN_NAME}:${intercom.id}`);

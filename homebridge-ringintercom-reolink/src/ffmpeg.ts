@@ -45,7 +45,14 @@ export interface SpawnOptions {
     name: string;
     log: Log;
     stdio?: ('pipe' | 'ignore')[];
+    /** receives every stderr line (before rate limiting). */
+    onLine?: (line: string) => void;
 }
+
+// a broken stream can make ffmpeg print thousands of lines per second,
+// which would flood the log and slow down Homebridge.
+const LOG_LINES_PER_WINDOW = 20;
+const LOG_WINDOW_MS = 10000;
 
 /**
  * Spawns ffmpeg and forwards stderr to the log (debug level, warnings and errors are logged as such).
@@ -57,6 +64,9 @@ export function spawnFFmpeg(ffmpegPath: string, args: string[], options: SpawnOp
         stdio: options.stdio ?? ['ignore', 'pipe', 'pipe'],
     });
     let pending = '';
+    let windowStart = Date.now();
+    let windowLines = 0;
+    let suppressed = 0;
     cp.stderr?.on('data', (data: Buffer) => {
         pending += data.toString();
         const lines = pending.split(/\r?\n|\r/);
@@ -64,6 +74,19 @@ export function spawnFFmpeg(ffmpegPath: string, args: string[], options: SpawnOp
         for (const line of lines) {
             if (!line.trim())
                 continue;
+            options.onLine?.(line);
+            const now = Date.now();
+            if (now - windowStart > LOG_WINDOW_MS) {
+                if (suppressed)
+                    log.debug(`[${name}] ... ${suppressed} more ffmpeg messages suppressed`);
+                windowStart = now;
+                windowLines = 0;
+                suppressed = 0;
+            }
+            if (++windowLines > LOG_LINES_PER_WINDOW) {
+                suppressed++;
+                continue;
+            }
             log.debug(`[${name}] ${redact(line)}`);
         }
     });

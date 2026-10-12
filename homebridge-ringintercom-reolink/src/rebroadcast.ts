@@ -42,6 +42,7 @@ export class Rebroadcast extends EventEmitter {
     private running = false;
     private connected = false;
     private keyframeWarned = false;
+    private mixWarned = false;
     private startedAt = 0;
     private lastData = 0;
     private failures = 0;
@@ -166,9 +167,21 @@ export class Rebroadcast extends EventEmitter {
         ];
 
         this.log.debug(`${this.name}: connecting (${stream.protocol})`);
+        let badSequences = 0;
         const cp = spawnFFmpeg(this.ffmpegPath, args, {
             name: this.name,
             log: this.log,
+            onLine: line => {
+                // Reolink's RTSP server mixes the packets of several clients of the same stream
+                // into each tcp connection. ffmpeg then sees foreign sequence numbers.
+                if (!line.includes('bad cseq') || this.mixWarned)
+                    return;
+                if (++badSequences === 50) {
+                    this.mixWarned = true;
+                    this.log.warn(`${this.name}: the camera sends a garbled RTSP stream. This happens when another program `
+                        + '(e.g. Scrypted, NVR, Reolink client) uses the same stream at the same time. Disconnect it or set the stream protocol to HTTP-FLV.');
+                }
+            },
         });
         this.cp = cp;
         this.startedAt = Date.now();

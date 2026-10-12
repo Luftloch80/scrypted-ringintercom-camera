@@ -164,4 +164,7 @@ class UiServer extends HomebridgePluginUiServer {
     }
 }
 
+// the UI may close the connection while the server starts (e.g. when the page is reloaded).
+process.on('error', () => { });
+
 (() => new UiServer())();
