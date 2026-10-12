@@ -431,6 +431,17 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
         return mediaManager.createFFmpegMediaObject(ffmpegInput);
     }
 
+    private async getKeyFrameIntervalMs(streamId: string) {
+        const config = await this.getReolinkEncoderConfig().catch(() => undefined);
+        const stream = streamId === 'sub' ? config?.sub : config?.main;
+        const gop = Number(stream?.gop);
+        const frameRate = Number(stream?.frameRate);
+        let seconds = 4;
+        if (gop > 0)
+            seconds = gop <= 10 || !(frameRate > 0) ? gop : gop / frameRate;
+        return Math.min(Math.max(seconds, 1), 8) * 1000;
+    }
+
     /**
      * The video for the intercom stream. It is taken from the Rebroadcast plugin (the stream
      * it already keeps open for the camera), because the Reolink RTSP server mixes up the
@@ -439,7 +450,11 @@ export class RingIntercomCamera extends ScryptedDeviceBase implements VideoCamer
     private async getIntercomVideoInput(baseId: string): Promise<{ args: string[], rebroadcastUrl?: string }> {
         try {
             const device = sdk.systemManager.getDeviceById<VideoCamera>(this.id);
-            const mo = await device.getVideoStream({ id: baseId });
+            // Rebroadcast only searches the last key frame interval for a key frame to start with
+            // and often misses it, the picture then appears only with the next key frame.
+            // A bit more prebuffer makes it start with the last key frame right away.
+            const prebuffer = await this.getKeyFrameIntervalMs(baseId) * 1.3;
+            const mo = await device.getVideoStream({ id: baseId, prebuffer });
             const input = await mediaManager.convertMediaObjectToJSON<FFmpegInput>(mo, ScryptedMimeTypes.FFmpegInput);
             const direct = this.getReolink().getStreams().map(s => s.url);
             if (input.url && !direct.includes(input.url)) {

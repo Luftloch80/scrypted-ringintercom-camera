@@ -25,6 +25,9 @@ export interface ReolinkEncoderStream {
     width: number;
     height: number;
     vType?: string;
+    frameRate?: number;
+    /** key frame interval: newer firmware reports a factor of the frame rate (1-4), older ones frames. */
+    gop?: number;
 }
 
 export class ReolinkClient {
