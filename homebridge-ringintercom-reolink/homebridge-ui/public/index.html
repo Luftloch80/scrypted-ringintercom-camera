@@ -1,0 +1,228 @@
+<style>
+  .ri-card { border: 1px solid rgba(128, 128, 128, 0.35); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .ri-card h5 { margin-top: 0; }
+  .ri-muted { opacity: 0.75; font-size: 0.9em; }
+  .ri-ok { color: #28a745; font-weight: 600; }
+  .ri-warn { color: #e0a800; }
+  .ri-hidden { display: none; }
+  .ri-snapshot { max-width: 100%; border-radius: 6px; margin-top: 10px; }
+  .ri-result table { margin-top: 8px; }
+  .ri-result td { padding: 2px 12px 2px 0; }
+</style>
+
+<div class="ri-card">
+  <h5>Ring-Konto</h5>
+  <div id="ringStatus" class="ri-muted">Wird geladen …</div>
+
+  <div id="ringLogin" class="ri-hidden" style="margin-top: 12px;">
+    <div class="form-group mb-2">
+      <label for="ringEmail">E-Mail</label>
+      <input type="email" class="form-control" id="ringEmail" autocomplete="username">
+    </div>
+    <div class="form-group mb-2">
+      <label for="ringPassword">Passwort</label>
+      <input type="password" class="form-control" id="ringPassword" autocomplete="current-password">
+    </div>
+    <div id="ringCodeGroup" class="form-group mb-2 ri-hidden">
+      <label for="ringCode" id="ringCodeLabel">Bestätigungscode</label>
+      <input type="text" class="form-control" id="ringCode" inputmode="numeric" autocomplete="one-time-code">
+    </div>
+    <button type="button" class="btn btn-primary" id="ringLoginButton">Bei Ring anmelden</button>
+    <button type="button" class="btn btn-secondary ri-hidden" id="ringCancelButton">Abbrechen</button>
+    <div class="ri-muted" style="margin-top: 8px;">E-Mail und Passwort werden nicht gespeichert, nur der Ring-Token.</div>
+  </div>
+
+  <div id="ringIntercoms" class="ri-hidden" style="margin-top: 12px;"></div>
+</div>
+
+<div class="ri-card">
+  <h5>Reolink-Kamera testen</h5>
+  <div class="ri-muted">Prüft mit den Einstellungen unten (auch ungespeicherten) die Verbindung zur Kamera, zeigt die Stream-Daten und ein aktuelles Bild.</div>
+  <div style="margin-top: 10px;">
+    <button type="button" class="btn btn-outline-primary" id="cameraTestButton">Kamera testen</button>
+  </div>
+  <div id="cameraResult" class="ri-result"></div>
+</div>
+
+<script>
+  (async () => {
+    const PLATFORM = 'RingIntercomReolink';
+    const $ = id => document.getElementById(id);
+    let configs = [];
+    let codeRequested = false;
+
+    function show(id, visible) {
+      $(id).classList.toggle('ri-hidden', !visible);
+    }
+
+    function escapeHtml(text) {
+      return String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function platformConfig() {
+      if (!configs.length)
+        configs.push({ platform: PLATFORM, name: 'Ring Intercom Reolink', cameras: [] });
+      if (!configs[0].cameras)
+        configs[0].cameras = [];
+      return configs[0];
+    }
+
+    async function loadConfig() {
+      configs = await homebridge.getPluginConfig();
+      renderRing();
+    }
+
+    function renderRing() {
+      const config = configs[0] || {};
+      if (config.refreshToken) {
+        $('ringStatus').innerHTML = '<span class="ri-ok">✔ Mit Ring verbunden.</span> '
+          + '<button type="button" class="btn btn-link p-0" id="ringRelogin">Neu anmelden</button>';
+        $('ringRelogin').onclick = () => {
+          show('ringLogin', true);
+          $('ringStatus').textContent = 'Neue Anmeldung bei Ring:';
+        };
+        show('ringLogin', false);
+      }
+      else {
+        $('ringStatus').textContent = 'Noch nicht mit Ring verbunden. Bitte mit dem Ring-Konto anmelden:';
+        show('ringLogin', true);
+      }
+    }
+
+    function resetLogin() {
+      codeRequested = false;
+      $('ringCode').value = '';
+      show('ringCodeGroup', false);
+      show('ringCancelButton', false);
+      $('ringLoginButton').textContent = 'Bei Ring anmelden';
+    }
+
+    $('ringCancelButton').onclick = () => resetLogin();
+
+    $('ringLoginButton').onclick = async () => {
+      const email = $('ringEmail').value.trim();
+      const password = $('ringPassword').value;
+      const code = $('ringCode').value.trim();
+      if (!email || !password) {
+        homebridge.toast.error('Bitte E-Mail und Passwort eingeben.');
+        return;
+      }
+      if (codeRequested && !code) {
+        homebridge.toast.error('Bitte den Bestätigungscode eingeben.');
+        return;
+      }
+
+      homebridge.showSpinner();
+      try {
+        const result = await homebridge.request('/ring/login', { email, password, code: codeRequested ? code : undefined });
+        if (result.codePrompt) {
+          codeRequested = true;
+          $('ringCodeLabel').textContent = result.codePrompt;
+          show('ringCodeGroup', true);
+          show('ringCancelButton', true);
+          $('ringLoginButton').textContent = 'Code bestätigen';
+          $('ringCode').focus();
+          homebridge.toast.info('Ring hat einen Bestätigungscode geschickt.');
+          return;
+        }
+
+        // the current values of the form below, also unsaved ones.
+        configs = await homebridge.getPluginConfig();
+        const config = platformConfig();
+        config.refreshToken = result.refreshToken;
+
+        // without any doorbell configured yet, prepare one for each intercom.
+        if (!config.cameras.length) {
+          for (const intercom of result.intercoms || [])
+            config.cameras.push({ name: intercom.name, intercom: intercom.name, reolinkHost: '', reolinkUsername: 'admin' });
+        }
+
+        await homebridge.updatePluginConfig(configs);
+        await homebridge.savePluginConfig();
+        $('ringPassword').value = '';
+        resetLogin();
+        renderRing();
+
+        const intercoms = result.intercoms || [];
+        $('ringIntercoms').innerHTML = intercoms.length
+          ? '<div>Gefundene Ring Intercoms:</div><ul>' + intercoms.map(i =>
+            `<li><b>${escapeHtml(i.name)}</b> <span class="ri-muted">(${escapeHtml(i.location)}, ID ${escapeHtml(i.id)}${i.batteryLevel != null ? ', Akku ' + escapeHtml(i.batteryLevel) + '%' : ''})</span></li>`).join('') + '</ul>'
+          : '<div class="ri-warn">Im Ring-Konto wurde kein Intercom gefunden.</div>';
+        show('ringIntercoms', true);
+
+        // reload the settings form below with the new values.
+        homebridge.hideSchemaForm();
+        homebridge.showSchemaForm();
+        homebridge.toast.success('Ring-Anmeldung gespeichert. Bitte die Reolink-Daten ergänzen und Homebridge neu starten.');
+      }
+      catch (e) {
+        homebridge.toast.error(e?.message || 'Ring-Anmeldung fehlgeschlagen.');
+        if (codeRequested)
+          resetLogin();
+      }
+      finally {
+        homebridge.hideSpinner();
+      }
+    };
+
+    $('cameraTestButton').onclick = async () => {
+      // the current values of the form below, also unsaved ones.
+      configs = await homebridge.getPluginConfig();
+      const cameras = ((configs[0] && configs[0].cameras) || []).filter(c => c.reolinkHost);
+      const result = $('cameraResult');
+      result.innerHTML = '';
+      if (!cameras.length) {
+        homebridge.toast.error('Bitte zuerst unten die IP-Adresse der Reolink-Kamera eintragen.');
+        return;
+      }
+      homebridge.showSpinner();
+      try {
+        for (const camera of cameras) {
+          const div = document.createElement('div');
+          result.appendChild(div);
+          await testCamera(camera, div, cameras.length > 1);
+        }
+      }
+      finally {
+        homebridge.hideSpinner();
+      }
+    };
+
+    async function testCamera(camera, result, showName) {
+      const title = showName ? `<div style="margin-top: 12px;"><b>${escapeHtml(camera.name || camera.reolinkHost)}</b></div>` : '';
+      try {
+        const r = await homebridge.request('/reolink/test', {
+          host: camera.reolinkHost,
+          username: camera.reolinkUsername,
+          password: camera.reolinkPassword,
+          https: camera.reolinkHttps,
+          channel: camera.reolinkChannel,
+          rtspPath: camera.reolinkRtspPath,
+        });
+
+        const row = (label, s) => s
+          ? `<tr><td>${label}</td><td>${escapeHtml(s.width)}×${escapeHtml(s.height)}</td><td>${escapeHtml(s.codec || '')}</td>`
+          + `<td>${s.frameRate ? escapeHtml(s.frameRate) + ' fps' : ''}</td><td>${s.bitRate ? escapeHtml(s.bitRate) + ' kbit/s' : ''}</td></tr>`
+          : '';
+        const hints = [];
+        if (r.main && /265|hevc/i.test(r.main.codec || ''))
+          hints.push('Der Main-Stream ist H.265. HomeKit braucht H.264: in der Reolink-App auf H.264 umstellen.');
+        if (r.main && r.main.width > 2560)
+          hints.push('Sehr hohe Auflösung: wenn das Livebild ruckelt, „Stream für das Livebild“ auf Sub stellen.');
+
+        result.innerHTML = title + '<div class="ri-ok" style="margin-top: 10px;">✔ Verbindung zur Kamera klappt.</div>'
+          + '<table>' + row('Main', r.main) + row('Sub', r.sub) + '</table>'
+          + hints.map(h => `<div class="ri-warn">⚠ ${escapeHtml(h)}</div>`).join('')
+          + (r.snapshot
+            ? `<img class="ri-snapshot" src="data:image/jpeg;base64,${r.snapshot}" alt="Snapshot">`
+            : '<div class="ri-warn">Die Verbindung klappt, aber die Kamera hat kein Bild geliefert.</div>');
+      }
+      catch (e) {
+        result.innerHTML = title + `<div class="ri-warn" style="margin-top: 10px;">✖ ${escapeHtml(e?.message || 'Test fehlgeschlagen')}</div>`;
+      }
+    }
+
+    await loadConfig();
+    homebridge.showSchemaForm();
+  })();
+</script>

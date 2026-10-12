@@ -37,26 +37,26 @@ sh install-homebridge-plugin.sh
 
 Das Skript erkennt selbst, ob Homebridge als Paket (`hb-service`) oder im Docker-Container läuft, installiert das fertige Paket aus `release/` und startet Homebridge neu.
 
-### Ring Refresh Token erzeugen
+### Einrichtung in der Homebridge-Oberfläche (UI X)
 
-Einmalig auf dem Pi ausführen. Das Tool fragt nach E-Mail, Passwort und dem 2FA-Code:
+Öffne **Plugins → Ring Intercom + Reolink → Einstellungen**. Die Seite hat drei Teile:
 
-```bash
-npx -p ring-client-api ring-auth-cli
-```
+1. **Ring-Konto:** E-Mail und Passwort eingeben, dann auf *Bei Ring anmelden* klicken.
+   - Ist bei Ring die Zwei-Faktor-Anmeldung aktiv, erscheint ein Feld für den Code aus der SMS, der E-Mail oder der Authenticator-App.
+   - Der Ring-Token wird danach automatisch gespeichert. E-Mail und Passwort werden **nicht** gespeichert.
+   - Die gefundenen Intercoms werden angezeigt, und für jedes wird eine Türklingel vorbereitet.
+2. **Reolink-Daten:** Weiter unten IP-Adresse, Benutzer und Passwort der Kamera eintragen.
+3. **Kamera testen:** prüft die Verbindung (auch mit noch nicht gespeicherten Werten), zeigt Auflösung, Codec und Bildrate von Main- und Sub-Stream sowie ein aktuelles Bild. Bei H.265 gibt es einen Hinweis, weil HomeKit H.264 braucht.
 
-Den angezeigten Token trägst du in den Plugin-Einstellungen ein. Ring erneuert den Token regelmäßig, das Plugin speichert den jeweils neuesten selbst in `ringintercom-reolink.json` im Homebridge-Ordner.
+Danach:
 
-### Einrichtung in der Homebridge-Oberfläche
-
-1. Öffne **Plugins → Ring Intercom + Reolink → Einstellungen**.
-2. Trag den Ring Refresh Token sowie IP-Adresse, Benutzer und Passwort der Reolink-Kamera ein.
-3. Empfohlen: Lass das Plugin als **Child Bridge** laufen (Plugin-Menü → Bridge-Einstellungen).
-4. Starte Homebridge neu.
-5. Die Türklingel wird als **eigenes Gerät** veröffentlicht, nicht über die Homebridge-Bridge. Füge sie in der Home-App so hinzu:
+1. **Speichern** und Homebridge neu starten. Empfohlen: das Plugin als **Child Bridge** laufen lassen (Plugin-Menü → Bridge-Einstellungen).
+2. Die Türklingel wird als **eigenes Gerät** veröffentlicht, nicht über die Homebridge-Bridge. Füge sie in der Home-App so hinzu:
    1. Tippe auf **+ → Gerät hinzufügen → Weitere Optionen → Vordereingang**.
-   2. Gib den Code der Homebridge ein, er steht in der Homebridge-Oberfläche bzw. im Log.
-6. Aktiviere in der Home-App in den Kamera-Einstellungen **Streamen & Aufnehmen** (HKSV). Dafür ist eine Steuerzentrale (HomePod/Apple TV) und iCloud+ nötig.
+   2. Gib den Code der Homebridge ein (Homebridge-Startseite bzw. Log).
+3. Aktiviere in der Home-App in den Kamera-Einstellungen **Streamen & Aufnehmen** (HKSV). Dafür ist eine Steuerzentrale (HomePod/Apple TV) und iCloud+ nötig.
+
+Ohne Homebridge-Oberfläche lässt sich der Token alternativ auf der Kommandozeile erzeugen (`npx -p ring-client-api ring-auth-cli`) und als `refreshToken` in die config.json eintragen. Ring erneuert den Token regelmäßig, das Plugin speichert den jeweils neuesten selbst in `ringintercom-reolink.json` im Homebridge-Ordner.
 
 ### Beispiel-Konfiguration
 

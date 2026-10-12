@@ -2,8 +2,8 @@
   "pluginAlias": "RingIntercomReolink",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "Ring Intercom als HomeKit-Türklingel mit dem Bild einer Reolink-Kamera, HomeKit Secure Video, Gegensprechen über den Intercom und Türöffner. Die Türklingel erscheint als eigenes Gerät: nach dem Neustart in der Home-App über **+ → Gerät hinzufügen → Weitere Optionen** mit dem Homebridge-Code hinzufügen.",
-  "footerDisplay": "Den Ring Refresh Token erzeugst du auf dem Pi mit `npx -p ring-client-api ring-auth-cli`.",
+  "customUi": true,
+  "headerDisplay": "Oben mit dem Ring-Konto anmelden (der Token wird automatisch eingetragen), unten die Reolink-Kamera eintragen und mit „Kamera testen“ prüfen. Nach dem Neustart erscheint die Türklingel als eigenes Gerät: in der Home-App über **+ → Gerät hinzufügen → Weitere Optionen** mit dem Homebridge-Code hinzufügen.",
   "schema": {
     "type": "object",
     "properties": {
@@ -16,8 +16,7 @@
       "refreshToken": {
         "title": "Ring Refresh Token",
         "type": "string",
-        "description": "Erzeugen mit: npx -p ring-client-api ring-auth-cli. Ring erneuert den Token regelmäßig, das Plugin speichert den jeweils neuesten selbst.",
-        "required": true
+        "description": "Wird durch die Ring-Anmeldung oben automatisch eingetragen. Ring erneuert den Token regelmäßig, das Plugin speichert den jeweils neuesten selbst."
       },
       "ffmpegPath": {
         "title": "ffmpeg-Pfad (optional)",
@@ -75,9 +74,24 @@
               "type": "string",
               "default": "rtsp",
               "oneOf": [
-                { "title": "RTSP (Standard)", "enum": ["rtsp"] },
-                { "title": "HTTP-FLV (stabiler bei manchen Reolink-Modellen)", "enum": ["flv"] },
-                { "title": "RTMP", "enum": ["rtmp"] }
+                {
+                  "title": "RTSP (Standard)",
+                  "enum": [
+                    "rtsp"
+                  ]
+                },
+                {
+                  "title": "HTTP-FLV (stabiler bei manchen Reolink-Modellen)",
+                  "enum": [
+                    "flv"
+                  ]
+                },
+                {
+                  "title": "RTMP",
+                  "enum": [
+                    "rtmp"
+                  ]
+                }
               ],
               "description": "Wenn das Bild hängt oder die Verbindung ständig abbricht, HTTP-FLV probieren. Dafür muss in der Reolink-App unter Netzwerk → Erweitert → Server-Einstellungen HTTP und RTMP aktiv sein."
             },
@@ -91,9 +105,24 @@
               "type": "string",
               "default": "h264Preview",
               "oneOf": [
-                { "title": "h264Preview (Standard)", "enum": ["h264Preview"] },
-                { "title": "h265Preview (nur wenn die Kamera H.265 sendet, HomeKit braucht H.264)", "enum": ["h265Preview"] },
-                { "title": "Preview", "enum": ["Preview"] }
+                {
+                  "title": "h264Preview (Standard)",
+                  "enum": [
+                    "h264Preview"
+                  ]
+                },
+                {
+                  "title": "h265Preview (nur wenn die Kamera H.265 sendet, HomeKit braucht H.264)",
+                  "enum": [
+                    "h265Preview"
+                  ]
+                },
+                {
+                  "title": "Preview",
+                  "enum": [
+                    "Preview"
+                  ]
+                }
               ]
             },
             "reolinkHttps": {
@@ -106,8 +135,18 @@
               "type": "string",
               "default": "main",
               "oneOf": [
-                { "title": "Main (volle Auflösung)", "enum": ["main"] },
-                { "title": "Sub (geringe Auflösung, schont WLAN/Mobilfunk)", "enum": ["sub"] }
+                {
+                  "title": "Main (volle Auflösung)",
+                  "enum": [
+                    "main"
+                  ]
+                },
+                {
+                  "title": "Sub (geringe Auflösung, schont WLAN/Mobilfunk)",
+                  "enum": [
+                    "sub"
+                  ]
+                }
               ]
             },
             "recordingStream": {
@@ -115,8 +154,18 @@
               "type": "string",
               "default": "main",
               "oneOf": [
-                { "title": "Main", "enum": ["main"] },
-                { "title": "Sub", "enum": ["sub"] }
+                {
+                  "title": "Main",
+                  "enum": [
+                    "main"
+                  ]
+                },
+                {
+                  "title": "Sub",
+                  "enum": [
+                    "sub"
+                  ]
+                }
               ]
             },
             "intercomAudio": {

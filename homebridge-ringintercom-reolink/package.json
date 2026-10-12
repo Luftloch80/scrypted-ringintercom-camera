@@ -1,8 +1,8 @@
 {
   "name": "homebridge-ringintercom-reolink",
   "displayName": "Ring Intercom + Reolink",
-  "version": "0.1.0",
-  "description": "Ring Intercom als HomeKit-Türklingel mit dem Bild einer Reolink-Kamera, HomeKit Secure Video, Gegensprechen über den Intercom und Türöffner.",
+  "version": "0.2.0",
+  "description": "Ring Intercom als HomeKit-T\u00fcrklingel mit dem Bild einer Reolink-Kamera, HomeKit Secure Video, Gegensprechen \u00fcber den Intercom und T\u00fcr\u00f6ffner.",
   "type": "module",
   "main": "dist/index.js",
   "license": "MIT",
@@ -25,6 +25,7 @@
   },
   "files": [
     "dist",
+    "homebridge-ui",
     "config.schema.json",
     "README.md"
   ],
@@ -34,6 +35,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
+    "@homebridge/plugin-ui-utils": "^2.2.6",
     "ring-client-api": "14.3.0",
     "werift": "0.22.4"
   },

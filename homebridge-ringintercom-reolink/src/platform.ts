@@ -77,7 +77,7 @@ export class RingIntercomReolinkPlatform implements DynamicPlatformPlugin {
         this.writeState(state);
 
         if (!refreshToken) {
-            this.log.error('Ring refresh token missing. Create one with: npx -p ring-client-api ring-auth-cli');
+            this.log.error('Not logged in to Ring: open the plugin settings in the Homebridge UI and log in with your Ring account.');
             return;
         }
 
